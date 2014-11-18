@@ -48,3 +48,19 @@ makeFitPlots = function(fit, plotDirectory, v, forceRedoVolcanoes=F, forceRedoDi
     catLog('done!\n', sep='')
   }
 }
+
+#helepr functions converting from genomic coordinates to chr+bp
+xToChr = function(x, genome='hg19') {
+  chrL = chrLengths(genome)
+  ret = rep('', length(x))
+  for ( chr in names(chrL) ) {
+    ret[x > 0 & x < chrL[chr]] = chr
+    x = x - chrL[chr]
+  }
+  return(ret)
+}
+xToPos = function(x, genome='hg19') {
+  chr = xToChr(x, genome)
+  pos = x - cumsum(chrLengths(genome))[chr] + chrLengths(genome)[chr]
+  return(pos)
+}

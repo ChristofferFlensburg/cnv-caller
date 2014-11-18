@@ -2,6 +2,7 @@
 require(limma)
 require(edgeR)
 require(Rsubread)
+require(parallel)
 
 #This function take a set of bamfiles, a set of normal bamfiles, and capture regions as input.
 #The function runs differential coverage one each sample vs the pool of normals using limma-voom.
@@ -309,4 +310,143 @@ humanChrLengths = function() {
 chrLengths = function(genome='hg19') {
   if ( genome == 'hg19' ) return(humanChrLengths())
   else stop('chrLengths doesnt know about genome', genome, '\n')
+}
+
+#helper function that MA-plots two vectors
+plotMA = function(x, y, col=mcri('darkblue'), coloured=T, libNorm = F, span=0.2,
+  xlab='A = log2(x*y)/2', ylab='M = log2(x/y)', labelLimit = Inf, removeZero=F, loess=F,
+  poisErr=F, add=F, smear=1, returnMarked=F, dontPlot=F, cex=0.6, pch=16, verbose=T, ...) {
+  Nx = sum(x)
+  Ny = sum(y)
+  if ( labelLimit < Inf ) {
+    print = pvals(x+y, x, Nx/(Nx+Ny)) < labelLimit
+  }
+  if ( libNorm ) {
+    x = x/Nx
+    y = y/Ny
+  }
+  if ( removeZero ) {
+    keep = x > 0 & y > 0
+    x = x[keep]
+    y = y[keep]
+  }
+  if ( smear > 0 ) {
+    xmin = ymin = smear
+    if ( libNorm ) {
+      xmin = smear/Nx
+      ymin = smear/Ny
+    }
+    x = xmin*0.2 + noneg(xmin*0.8 + x + pmax(-0.45*xmin, pmin(0.45*xmin, rnorm(length(x), 0, xmin*0.15))))
+    y = ymin*0.2 + noneg(ymin*0.8 + y + pmax(-0.45*xmin, pmin(0.45*xmin, rnorm(length(y), 0, ymin*0.15))))
+  }
+  else {
+    x = x
+    y = y
+  }
+  A = log2(x*y)/2
+  M = log2(x/y)
+  if ( !dontPlot ) {
+    if ( !add )
+      plot(A, M, cex=cex, pch=pch, xlab=xlab, ylab=ylab, yaxt='n',
+           col=col, ...)
+    else
+      points(A, M, cex=cex, pch=pch, col=col, ...)
+    segments(rep(-30, 5), c(0,-1,1, log2(c(10, 0.1))), rep(30,5), c(0,-1,1, log2(c(10, 0.1))), col=rgb(.5, .5, .5, .2), lwd=2)
+    if ( coloured ) {
+      points(A, M, cex=2/3*cex, pch=pch,
+             col=mcri('blue', 0.4))
+      points(A, M, cex=1/2*cex, pch=pch,
+             col=mcri('azure', 0.1))
+      points(A, M, cex=1/3*cex, pch=pch,
+             col=mcri('green', 0.02))
+    }
+    if ( !add )
+      axis(2, at=c(log2(0.1), -1, 0,1,log2(10)), labels=c('log2(0.1)', '-1', '0', '1', 'log2(10)'), cex.axis=1)
+    
+    if ( poisErr ) {
+      As = (0:300)/10
+      xs = 10^(As)*Nx/(Nx+Ny)
+      ys = 10^(As)*Ny/(Nx+Ny)
+      deltas = sqrt(log2(1+1/sqrt(xs))^2 + log2(1+1/sqrt(ys))^2)
+      if ( libNorm ) As = As - log2((Nx+Ny)/2)
+      lines(As, deltas, col=mcri('orange', 0.7), lwd=3)
+      lines(As, -deltas, col=mcri('orange', 0.7), lwd=3)
+    }
+  }
+
+  #name the outliers if required.
+  ret = c()
+  if ( labelLimit < Inf ) {
+    shift = (max(M) - min(M))*0.02
+    print[is.na(print)] = F
+    if ( sum(print) > 0 ) {
+      factor = abs(M)/(labelLimit*(max(A) - A)^2)
+      nms = names(x)
+      if ( is.null(nms) ) nms = 1:length(x)
+      if ( !dontPlot ) {
+        text(A[print], M[print] + shift, nms[print], cex=0.7)
+        if ( verbose ) cat('Highlighting genes ', nms[print], '\n')
+      }
+      ret = nms[print]
+    }
+  }
+
+  if ( loess & !dontPlot ) {
+    if ( verbose ) cat('Calculating loess fit...')
+    lo = loess(M~A, data.frame(M, A), control=loess.control(trace.hat = 'approximate'), span=span)
+    if ( verbose ) cat('done.\n')
+    As = min(A) + (0:100)/100*(max(A) - min(A))
+    lines(As, predict(lo, As), col=mcri('orange'), lwd=6)
+  }
+  return(ret)
+}
+#helper function that returns the mcri version of the provided colour(s) if available
+#Otherwise returns the input. Call without argument to see available colours
+mcri = function(col=0, al=1) {
+  if ( col[1] == 0 ) {
+    cat('Use: mcri(\'colour\'), returning an official MCRI colour.\nAvailable MCRI colours are:\n\ndarkblue\nblue\nlightblue\nazure\ngreen\norange\nviolet\ncyan\nred\nmagenta (aka rose).\n\nReturning default blue.\n')
+    return(mcri('blue'))
+  }
+  if ( length(col) > 1 ) return(sapply(col, function(c) mcri(c, al)))
+  if ( is.numeric(col) ) {
+    col = (col %% 8) + 1
+    if ( col == 1 ) col = 'blue'
+    else if ( col == 2 ) col = 'orange'
+    else if ( col == 3 ) col = 'green'
+    else if ( col == 4 ) col = 'magenta'
+    else if ( col == 5 ) col = 'cyan'
+    else if ( col == 6 ) col = 'red'
+    else if ( col == 7 ) col = 'violet'
+    else if ( col == 8 ) col = 'darkblue'
+    else col = 'black'
+  }
+  ret = 0
+  if ( col == 'darkblue') ret = rgb(9/255, 47/255, 94/255, al)
+  if ( col == 'blue') ret = rgb(0, 83/255, 161/255, al)
+  if ( col == 'lightblue') ret = rgb(0, 165/255, 210/255, al)
+  if ( col == 'azure') ret = rgb(0, 173/255, 239/255, al)
+  if ( col == 'green') ret = rgb(141/255, 198/255, 63/255, al)
+  if ( col == 'orange') ret = rgb(244/255, 121/255, 32/255, al)  
+  if ( col == 'violet') ret = rgb(122/255, 82/255, 199/255, al)  
+  if ( col == 'cyan') ret = rgb(0/255, 183/255, 198/255, al)  
+  if ( col == 'red') ret = rgb(192/255, 80/255, 77/255, al)  
+  if ( col == 'magenta' | col == 'rose') ret = rgb(236/255, 0/255, 140/255, al)
+  if ( ret == 0 ) ret = do.call(rgb, as.list(c(col2rgb(col)/255, al)))
+  return(ret)
+}
+
+
+#helper function for plotting
+#A pimped up version of the usual boring plot.
+#Features include pch=16, mcri colour scheme, correlation in title and highlighting for dense regions.
+plotColourScatter = function(x, y, xlab='', ylab='', col=mcri('darkblue'), main='cor',
+  add=F, cex=1,verbose=T,...) {
+  if ( verbose ) cat('Correlation is ', cor(x,y), '.\n', sep='')
+  if ( main == 'cor' ) main = paste('Correlation is', signif(cor(x,y), 2))
+  if ( !add ) plot(x, y, cex=cex*0.6, pch=16, xlab=xlab, ylab=ylab,
+                   col=col, main=main, ...)
+  else points(x, y, cex=cex*0.6, pch=16, col=col, ...)
+  points(x, y, cex=cex*0.4, pch=16, col=mcri('blue', 0.4))
+  points(x, y, cex=cex*0.3, pch=16, col=mcri('azure', 0.1))
+  points(x, y, cex=cex*0.2, pch=16, col=mcri('green', 0.02))
 }

@@ -1,11 +1,12 @@
-
+require(Rsamtools)
+require(parallel)
 require(GenomicRanges)
 
 #Takes a set of vcf files and corresponding bam files and capture regions.
 #The function filters variants outside of the capture regions, and a few other filters.
 #The function the checks the variants in the bamfiles, and flags if the variant seems suspicious.
 #Outputs a data frame for each sample with variant and reference counts, as well as some quality information.
-getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffset, Rdirectory, filterBoring=T, cpus, v, forceRedoSNPs=F, forceRedoVariants=F) {
+getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffset, dbDir, Rdirectory, plotDirectory, filterBoring=T, cpus, v, forceRedoSNPs=F, forceRedoVariants=F) {
   SNPsSaveFile = paste0(Rdirectory, '/SNPs.Rdata')
   if ( file.exists(SNPsSaveFile) & !forceRedoSNPs ) {
     catLog('Loading saved SNVs.\n')
@@ -50,7 +51,7 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
     SNPs = SNPs[!flag,]
     
     catLog('Matching to dbSNPs.\n')
-    SNPs = matchTodbSNPs(SNPs, genome=genome) #adding $db
+    SNPs = matchTodbSNPs(SNPs, dir=dbDir, genome=genome)
     
     catLog('Saving SNVs..')
     save(SNPs, file=SNPsSaveFile)
@@ -76,6 +77,22 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
     catLog('Saving variants..')
     save(variants, file=variantsSaveFile)
     catLog('done.\n')
+
+    catLog('Plotting frequency distributions..')
+    diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
+    if ( !file.exists(diagnosticPlotsDirectory) ) dir.create(diagnosticPlotsDirectory)
+    FreqDirectory = paste0(diagnosticPlotsDirectory, '/frequencyDistribution/')
+    if ( !file.exists(FreqDirectory) ) dir.create(FreqDirectory)
+    for ( sample in names(variants) ) {
+      catLog(sample, '..', sep='')
+      png(paste0(MAdirectory, col, '.png'), height=2000, width=4000, res=144)
+      use = variants[[sample]]$cov > 0
+      plotColourScatter(variants[[sample]]$var/variants[[sample]]$cov, variants[[sample]]$cov,
+                        log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
+      hist(variants[[sample]]$var/variants[[sample]]$cov, breaks=(0:100)/100, col=mcri('blue'))
+      dev.off()
+    }
+    catLog('done.\n')  
   }
   
   return(list(SNPs=SNPs, variants=variants))
@@ -158,4 +175,409 @@ flagStrandBias = function(SNPs) {
   
   flag = fdr < 0.05
   return(flag)
+}
+
+#hepler function that marks the variants in a SNPs object as db or non db SNPs.
+matchTodbSNPs = function(SNPs, dir='~/data/dbSNP', genome='hg19') {
+  SNPs$db = rep(NA, nrow(SNPs))
+  if ( genome == 'hg19' ) chrs = names(humanChrLengths())
+  else if ( genome == 'mm10' ) {
+    chrs = names(mouseChrLengths())
+    dir = '~/data/dbSNP/mm10'
+  }
+  for (chr in chrs ) {
+    if ( !file.exists(paste0(dir,'/ds_flat_ch', chr, '.dbSNP')) ) {
+      catLog('File not found for chromosome ', chr, '! Marking all as not db SNPs.\n')
+      if ( chr %in% SNPs$chr ) SNPs$db[SNPs$chr == chr] = F
+      next
+    }
+    RsaveFile = paste0(dir,'/chr', chr, '.Rdata')
+    if ( !file.exists(RsaveFile) ) {
+      catLog('Chromosome ', chr, ': loading dbSNPs..', sep='')
+      db = read.table(paste0(dir,'/ds_flat_ch', chr, '.dbSNP'), header = T, fill=T)
+      catLog('extracting positions..')
+      db = db[db$pos != '?',] #without position, the dbSNP is useless
+      dbPos = unique(db$pos)
+      catLog('saving positions for future use..')
+      save('dbPos', file=RsaveFile)
+    }
+    else {
+      catLog('Chromosome ', chr, ': loading db positions..')
+      load(file=RsaveFile)
+    }
+    catLog('matching to sample postions..')
+    chrSNPsI = which(SNPs$chr == chr)
+    if ( length(chrSNPsI) > 0 )
+      SNPs$db[chrSNPsI] = (SNPs$start[chrSNPsI] + ifelse(grepl('[-]', SNPs$variant[chrSNPsI]), 1, 0)) %in% dbPos
+    else catLog('no SNPs found in this chromosome..')
+    catLog('done.\n')
+  }
+  return(SNPs)
+}
+
+
+
+
+
+
+#helper functions that counts reads in favour of reference and any present variant
+#at the given locations for the given bam files.
+importQualityScores = function(SNPs, files, BQoffset, cpus=10, v='') {
+  ret=list()
+  chr = as.character(SNPs$chr)
+  for ( file in files ) {
+    catLog('Importing', length(chr), 'pileups by chr from', file, '\n')
+    if ( cpus > 1 ) {
+      listRet = mclapply(unique(chr), function(ch) {
+        use = chr == ch
+        catLog(ch, '..', sep='')
+        return(getQuality(file, chr[use], SNPs$start[use], BQoffset, cpus=1, v=v))
+      }, mc.cores=cpus)
+    }
+    else {
+      listRet = lapply(unique(chr), function(ch) {
+        use = chr == ch
+        catLog(ch, '..', sep='')
+        return(getQuality(file, chr[use], SNPs$start[use], BQoffset, cpus=1, v=v))
+      })
+    }
+    catLog('done!\n')
+    ret[[file]] = do.call(c, listRet)
+  }
+  return(ret)
+}
+getQuality = function(file, chr, pos, BQoffset, cpus=1, v='') {
+  require(parallel)
+  which = GRanges(chr, IRanges(pos-3, pos+3))
+  p1 = ScanBamParam(which=which, what=c('pos', 'seq', 'cigar', 'qual', 'mapq', 'strand'))
+  regionReads = scanBam(file, param=p1)
+  if ( cpus > 1 )
+    pileups = mclapply(1:length(pos), function(i) {
+      return(readsToPileup(regionReads[[i]], pos[i], BQoffset=BQoffset))}, mc.cores=cpus)
+  else
+    pileups = lapply(1:length(pos), function(i) readsToPileup(regionReads[[i]], pos[i], BQoffset=BQoffset))
+  return(pileups)
+}
+readsToPileup = function(reads, pos, BQoffset) {
+  cigars = reads$cigar
+  seqI = unlist(lapply(reads$pos, function(readPos) pos-readPos+1))
+  call = rep(NA, length(cigars))
+  qual = rep(NA, length(cigars))
+  mapq = reads$mapq
+  strand = reads$strand
+  easy = grepl('^[0-9]*M$', cigars)
+  call[easy] = substring(reads$seq[easy], seqI[easy], seqI[easy])
+  qual[easy] = charToInt(substring(reads$qual[easy], seqI[easy], seqI[easy]))-BQoffset
+  if ( length(cigars) > 0 ) {
+    NAcigar = is.na(cigars)
+    easy[NAcigar] = T
+    call[NAcigar] = ''
+    qual[NAcigar] = 0
+    mapq[NAcigar] = 0
+    strand[NAcigar] = '+'
+  }
+  if ( any(!easy) ) {
+    messyCalls = solveCigars(cigars[!easy], reads$seq[!easy], reads$qual[!easy], seqI[!easy])
+    if ( any(grepl('[a-z]', unlist(lapply(messyCalls, function(call) call[1])))) ) {
+      softClipped = grep('[a-z]', unlist(lapply(messyCalls, function(call) call[1])))
+      keepSoftClipped = rep(F, length(softClipped))
+      if ( sum(easy) > 2 ) {
+        consensus = substring(reads$seq[easy], seqI[easy]-2, seqI[easy]+2)
+        consensus = consensus[nchar(consensus) == 5]
+        if ( length(consensus) > 2 ) {
+          before = names(sort(table(substring(consensus, 1, 2)),decreasing=T)[1])
+          after = names(sort(table(substring(consensus, 4, 5)),decreasing=T)[1])
+          if ( nchar(before) == 2 & nchar(after) == 2 ) {
+            seqis = as.numeric(unlist(lapply(messyCalls, function(call) call[3])))[softClipped]
+            keepSoftClipped =
+              substring(reads$seq[!easy][softClipped], seqis-2,seqis-1) %in% c(before, gsub('^.', '^', before), '') &
+            substring(reads$seq[!easy][softClipped], seqis+1, seqis+2) %in% c(after, gsub('.$', '$', before), '')
+            if ( sum(keepSoftClipped) > 0 ) {
+              messyCalls[softClipped][keepSoftClipped] = lapply(messyCalls[softClipped][keepSoftClipped], function(call) {
+                call[1] = toupper(call[1])
+                return(call)
+              })
+            }
+          }
+        }
+      }
+      if ( sum(!keepSoftClipped) > 0 ) {
+        messyCalls[softClipped][!keepSoftClipped] = lapply(messyCalls[softClipped][!keepSoftClipped], function(call) {
+          call = c('', '', 0)
+          return(call)
+        })
+      }
+    }
+    #check for short softclipped calls, check if most other well-aligned reads agree, if so, keep, otherwise discard.
+    call[!easy] = unlist(lapply(messyCalls, function(solution) solution[1]))
+    qual[!easy] = unlist(lapply(messyCalls, function(solution) {
+      if ( solution[2] == '' ) return(0)
+      else return(mean(charToInt(unlist(strsplit(solution[2],split=NULL)))))
+      })) - BQoffset
+  }
+
+  ret = data.frame('call'=call, 'qual'=qual, 'mapq'=mapq, 'strand'=strand)
+  if ( any(is.na(as.matrix(ret))) ) {
+    catLog('NAs in pileup. Data frame was:\n')
+    for ( row in 1:nrow(ret) ) catLog(as.matrix(ret[row,]), '\n')
+    catLog('cigars are\n')
+    for ( row in 1:nrow(ret) ) catLog(reads$cigar[row], as.character(reads$seq[row]), as.character(reads$qual[row]), '\n')
+    catLog('NA pos', pos, '\n')
+    catLog('seqI', seqI, '\n')
+    stop('NAs in pileup.')
+  }
+  return(ret[ret$call != '' & !is.na(ret$qual) & !is.na(ret$mapq) & !is.na(ret$strand) & !is.na(ret$call),])
+}
+solveCigars = function(cigars, seqs, quals, seqIs) {
+  cigars = gsub('[X=]', 'M', cigars)
+  type = strsplit(gsub('^[0-9]+', '', cigars), split='[0-9]+')
+  lengths = strsplit(gsub('[MIDNSHP]+$', '', cigars), split='[MIDNSHP]')
+
+  calls = rep('', length(cigars))
+  qs = rep('', length(cigars))
+  checked = rep(1, length(cigars))
+  unSolved = rep(T, length(cigars))
+  for ( i in 1:max(unlist(lapply(type, length))) ) {
+    che = checked[unSolved]
+    sI = seqIs[unSolved]
+    tyIp1 = sapply(type[unSolved], function(t) if ( length(t) < i+1 ) '' else t[i+1])
+    tyI = sapply(type[unSolved], function(t) if ( length(t) < i ) '' else t[i])
+    se = seqs[unSolved]
+    le = lengths[unSolved]
+    leI = as.numeric(sapply(lengths[unSolved], function(l) l[i]))
+    qu = quals[unSolved]
+    
+    eOR = tyI == ''  #read ends before position
+    if ( any(eOR) ) {
+      calls[which(unSolved)[eOR]] = ''
+      qs[which(unSolved)[eOR]] = ''
+      seqIs[which(unSolved)[eOR]] = 0
+    }
+
+    iAP = che == sI+1 & tyI == 'I' #insert at position
+    if ( any(iAP) ) {
+      calls[which(unSolved)[iAP]] = paste0('+', substring(se[iAP], sI[iAP]+1, sI[iAP]+leI[iAP]))
+      qs[which(unSolved)[iAP]] = substring(qu[iAP], sI[iAP]+1, sI[iAP]+leI[iAP])
+      seqIs[which(unSolved)[iAP]] = sI[iAP]
+    }    
+
+    dAP = che == sI+1 & (tyI == 'D' | tyI == 'N') #deletion at position
+    if ( any(dAP) ) {
+      calls[which(unSolved)[dAP]] = paste0('-', leI[dAP])
+      qs[which(unSolved)[dAP]] = substring(qu[dAP], sI[dAP], sI[dAP])
+      seqIs[which(unSolved)[dAP]] = sI[dAP]
+    }
+
+    dSP = che > sI & !iAP & !dAP & tyI != 'S'  #deletion skipped over position
+    if ( any(dSP) ) {
+      calls[which(unSolved)[dSP]] = ''
+      qs[which(unSolved)[dSP]] = ''      
+      seqIs[which(unSolved)[dSP]] = 0      
+    }
+
+
+    nAP = che + leI - 1 >= sI & che <= sI & tyI == 'M' #normal read until position
+    fID = che + leI - 1 == sI & (tyIp1 == 'I' | tyIp1 == 'D' | tyIp1 == 'N')    #following indel
+    if ( any(nAP & fID) ) {
+      checked[which(unSolved)[nAP & fID]] = checked[which(unSolved)[nAP & fID]] + leI[nAP & fID]
+    }
+    if ( any(nAP & !fID) ) {
+      calls[which(unSolved)[nAP & !fID]] = substring(se[nAP & !fID], sI[nAP & !fID], sI[nAP & !fID])
+      qs[which(unSolved)[nAP & !fID]] = substring(qu[nAP & !fID], sI[nAP & !fID], sI[nAP & !fID])
+      seqIs[which(unSolved)[nAP & !fID]] = sI[nAP & !fID]
+    }
+    
+    sAPs =  che > sI & tyI == 'S' #soft clip over position at start of read
+    lt4 = leI < 4 #3 or fewer bp are soft clipped
+    if ( any(sAPs & lt4) ) {
+      calls[which(unSolved)[sAPs & lt4]] = tolower(substring(se[sAPs & lt4], (sI+leI)[sAPs & lt4], (sI+leI)[sAPs & lt4]))
+      qs[which(unSolved)[sAPs & lt4]] = substring(qu[sAPs & lt4], (sI+leI)[sAPs & lt4], (sI+leI)[sAPs & lt4])
+      seqIs[which(unSolved)[sAPs & lt4]] = (sI+leI)[sAPs & lt4]
+    }
+    if ( any(sAPs & !lt4) ) {
+      calls[which(unSolved)[sAPs & !lt4]] = ''
+      qs[which(unSolved)[sAPs & !lt4]] = ''
+      seqIs[which(unSolved)[sAPs & !lt4]] = 0
+    }
+
+    sAPe = che <= sI & che +leI > sI & tyI == 'S' & tyIp1 == '' #soft clip over position at end of read
+    lt4 = leI < 4 #3 or fewer bp are soft clipped
+    if ( any(sAPe & lt4) ) {
+      calls[which(unSolved)[sAPe & lt4]] = tolower(substring(se[sAPe & lt4], sI[sAPe & lt4], sI[sAPe & lt4]))
+      qs[which(unSolved)[sAPe & lt4]] = substring(qu[sAPe & lt4], sI[sAPe & lt4], sI[sAPe & lt4])
+      seqIs[which(unSolved)[sAPe & lt4]] = sI[sAPe & lt4]
+    }
+    if ( any(sAPe & !lt4) ) {
+      calls[which(unSolved)[sAPe & !lt4]] = ''
+      qs[which(unSolved)[sAPe & !lt4]] = ''
+      seqIs[which(unSolved)[sAPe & !lt4]] = 0
+    }
+    
+    nBP = !nAP & tyI == 'M'    #normal ending before position
+    if ( any(nBP) ) {
+      checked[which(unSolved)[nBP]] = checked[which(unSolved)[nBP]] + leI[nBP]
+    }
+
+    iBP = !iAP & !sAPs & !sAPe & (tyI == 'I' | tyI == 'S')   #insertion before positions
+    if ( any(iBP) ) {
+      checked[which(unSolved)[iBP]] = checked[which(unSolved)[iBP]] + leI[iBP]
+      seqIs[which(unSolved)[iBP]] = seqIs[which(unSolved)[iBP]] + leI[iBP]
+    }
+
+    dBP = !dAP & (tyI == 'D' | tyI == 'N')   #deletion before position
+    if ( any(dBP) ) {
+      seqIs[which(unSolved)[dBP]] = seqIs[which(unSolved)[dBP]] - leI[dBP]
+    }
+
+    unSolved[eOR | iAP | dAP | dSP | (nAP & !fID) | sAPs | sAPe] = F
+  }
+
+  solutions = lapply(1:length(cigars), function(i) c(calls[i], qs[i], seqIs[i]))
+  return(solutions)
+}
+QCsnps = function(pileups, SNPs, cpus=10) {
+  require(parallel)
+  references = as.character(SNPs$reference)
+  variants = as.character(SNPs$variant)
+  xs = SNPs$x
+  catLog('QCing', length(pileups), 'positons...')
+  ret = do.call(rbind, mclapply(1:length(pileups), function(i) {
+    if ( i/10000 == round(i/10000) ) catLog(i/1000, 'k..', sep='')
+    return(QCsnp(pileups[[i]], references[i], xs[i], variant='', defaultVariant=variants[i]))
+  }, mc.cores=cpus))
+  rownames(ret) = paste0(ret$x, ret$variant)
+  catLog('done.\n')
+  catLog('Variants:', nrow(ret), '\n')
+  catLog('Unflagged:', sum(ret$flag==''), '\n')
+  catLog('Average coverage over unflagged variants:', mean(ret$cov[ret$flag=='']), '\n')
+  catLog('Repeat flags:', length(grep('Rep', ret$flag)), '\n')
+  catLog('Mapping quality flags:', length(grep('Mq', ret$flag)), '\n')
+  catLog('Base quality flags:', length(grep('Bq', ret$flag)), '\n')
+  catLog('Strand bias flags:', length(grep('Sb', ret$flag)), '\n')
+  catLog('Single variant read flags:', length(grep('Svr', ret$flag)), '\n')
+  catLog('Single reference read flags:', length(grep('Srr', ret$flag)), '\n')
+  catLog('Minor variant flags:', length(grep('Mv', ret$flag)), '\n')
+  return(ret)
+}
+QCsnp = function(pileup, reference, x, variant='', defaultVariant='') {
+  if ( is.atomic(pileup) ) {
+    return(data.frame('x'=x, 'reference'=reference, 'variant'='', 'cov'=0, 'ref'=0, 'var'=0,
+                      'pbq'=1, 'pmq'=1, 'psr'=1, 'RIB'=0, 'flag'='err:atomic', stringsAsFactors=F))
+  }
+  
+  ref = pileup$call == reference
+  if ( variant=='' ) {
+    variant = unique(c(defaultVariant, as.character(pileup$call[!ref])))
+    variant = variant[variant != '']
+    if ( length(variant) > 1 ) {
+      ret = do.call(rbind, lapply(variant, function(var) QCsnp(pileup, reference, x, var)))
+      #flag non-zero variants that are not the strictly largest frequency
+      minorVariants = ret$var > 0 & (ret$var < max(ret$var) | sum(ret$var == max(ret$var)) > 1)
+      ret$flag[minorVariants] = paste0(ret$flag[minorVariants], 'Mv')
+      return(ret)
+    }
+    else if ( length(variant) == 1 ) QCsnp(pileup, reference, x, variant)
+    else variant = defaultVariant
+  }
+  var = pileup$call == variant
+
+  flag = ''
+  
+  #check for mapQ 0 or 1, if present, flag as repeat region.
+  #then remove those reads.
+  if ( any(pileup$mapq < 2) ) {
+    flag = paste0(flag, 'Rep')
+    pileup = pileup[pileup$mapq > 1,]
+    ref = pileup$call == reference
+    var = pileup$call == variant
+  }
+  
+  #compare base quality scores between variant and reference
+  pbq = 1 
+  if ( sum(ref) > 0 & sum(var) > 0 ) {
+    pbq = if ( sum(ref > 0) ) wilcox.test(pileup$qual[var], pileup$qual[ref], exact=F)$p.value else 1
+    if ( pbq < 0.01 & mean(pileup$qual[var]) < 30 & mean(pileup$qual[ref]) - mean(pileup$qual[var]) > 10  ) flag = paste0(flag, 'Bq')
+    else if ( mean(pileup$qual[var]) < 20 ) flag = paste0(flag, 'Bq')
+    else if ( sum(pileup$qual[var] > 30) < 0.1*sum(var) ) flag = paste0(flag, 'Bq')
+    #the wilcox test fails if all the scores are the same, returning NA. handle.
+    if ( is.na(pbq) ) pbq=1
+  }
+  
+  #compare mapping quality scores between variant and reference
+  pmq = 1 
+  if ( sum(ref) > 0 & sum(var) > 0 ) {
+    pmq = if ( sum(ref > 0) ) wilcox.test(pileup$mapq[var], pileup$mapq[ref], exact=F)$p.value else 1
+    if ( is.na(pmq) ) pmq = 1
+    if ( pmq < 0.01 & mean(pileup$mapq[var]) < 30 & mean(pileup$mapq[ref]) - mean(pileup$mapq[var]) > 10 ) flag = paste0(flag, 'Mq')
+    else if ( mean(pileup$mapq[var]) < 20 ) flag = paste0(flag, 'Mq')
+    else if ( sum(pileup$mapq[var] > 30) < 0.1*sum(var) ) flag = paste0(flag, 'Mq')
+    #the wilcox test fails if all the scores are the same, returning NA. Handle.
+    if ( is.na(pmq) ) pmq=1
+  }
+  
+  #compare strand ratio between variant and reference
+  psr = 1 
+  if ( sum(ref) > 0 & sum(var) > 0 ) {
+    psr = fisher.test(matrix(
+      c(sum(pileup$strand[ref] == '+'), sum(pileup$strand[ref] == '-'),
+        sum(pileup$strand[var] == '+'), sum(pileup$strand[var] == '-')), nrow=2))$p.value
+    if ( psr < 0.01 ) flag = paste0(flag, 'Sb')
+  }
+
+  #probabilities that the base call and mapping is correct.
+  bqW = 1-10^(-pileup$qual/10)
+  mqW = 1-10^(-pileup$mapq/10)
+  qW = bqW*mqW
+  RIB = sum(1-qW)/length(qW)
+  if ( is.na(RIB) ) RIB = 0
+
+  #count weighted reads.
+  refN = round(sum(qW[ref]))
+  varN = round(sum(qW[var]))
+  cov = round(sum(qW))
+
+  if (varN == 1) flag = paste0(flag, 'Svr')
+  if (refN == 1) flag = paste0(flag, 'Srr')
+
+  ret = data.frame('x'=x, 'reference'=reference, 'variant'=variant, 'cov'=cov, 'ref'=refN, 'var'=varN,
+    'pbq'=pbq, 'pmq'=pmq, 'psr'=psr, 'RIB'=RIB, 'flag'=flag, stringsAsFactors=F)
+  if ( any(is.na(as.matrix(ret))) ) {
+    catLog('Na in return value of QCsnp. Return value was:\n')
+    for ( row in 1:nrow(ret) ) catLog(as.matrix(ret[row,]), '\n')
+    catLog('input pileup:\n')
+    for ( row in 1:nrow(pileup) ) catLog(as.matrix(pileup[row,]), '\n')
+    catLog('input reference:', reference, '\n')
+    catLog('input variant:', variant, '\n')
+    catLog('input defaultVariant:', defaultVariant, '\n')
+    catLog('input x:', x, '\n')
+    stop('NA in return value of QCsnp. Abort.')
+  }
+  return(ret)
+}
+
+#helper function that makes sure all the variants are present in all the data frames.
+shareVariants = function(variants, v='') {
+  if ( v == 'trackProgress' ) cat('Adding uncalled variants..')      
+  common = Reduce(union, lapply(variants, rownames))
+  if ( length(common) == 0 ) return()
+  variants = lapply(variants, function(q) {
+    new = common[!(common %in% rownames(q))]
+    if ( length(new) > 0 ) {
+      if ( v == 'trackProgress' ) cat('Found ', length(new), '..', sep='')      
+      x = as.numeric(gsub('[AGNTCagtcn+-].*$', '', new))
+      newQ = q[q$x %in% x,]
+      newQ = newQ[!duplicated(newQ$x),]
+      rownames(newQ) = newQ$x
+      newQ = newQ[as.character(x),]
+      newQ$var = 0
+      newQ$flag = ''
+      rownames(newQ) = new
+      newQ$variant = gsub('^[0-9]+', '', new)
+      q = rbind(q, newQ)
+      q = q[common,]
+    }
+    return(q)
+  })
+  if ( v == 'trackProgress' ) cat('done!\n')      
+  return(variants)
 }

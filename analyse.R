@@ -263,8 +263,8 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
       #import, filter and QC the variants. Save to file.
       #The information about normals is used for QC, as there will be only true frequencies of 0, 0.5 and 1 in those samples.
       source('getVariants.R')
-      variants = try(getVariants(vcfFiles, bamFiles, names, captureRegions, genome, BQoffset,
-        Rdirectory, filterBoring=T, cpus=cpus, v=v, forceRedoSNPs=forceRedoSNPs,
+      variants = try(getVariants(vcfFiles, bamFiles, names, captureRegions, genome, BQoffset, dbSNPdirectory,
+        Rdirectory, plotDirectory, filterBoring=T, cpus=cpus, v=v, forceRedoSNPs=forceRedoSNPs,
         forceRedoVariants=forceRedoVariants))
       if ( class(variants) == 'try-error' ) {
         catLog('Error in getVariants.\n')
@@ -273,8 +273,8 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
       
       #Get variants from the external normals
       normalVariants =
-        try(getVariants(externalNormalVcfs, externalNormalBams, names(externalNormalBams),
-                        captureRegions, genome, BQoffset, normalRdirectory, filterBoring=F, cpus, v,
+        try(getVariants(externalNormalVcfs, externalNormalBams, names(externalNormalBams), captureRegions,
+                        genome, BQoffset, dbSNPdirectory, normalRdirectory, plotDirectory, filterBoring=F, cpus, v,
                         forceRedoSNPs=forceRedoNormalSNPs, forceRedoVariants=forceRedoNormalVariants))
       if ( class(normalVariants) == 'try-error' ) {
         catLog('Error in getVariants for normals.\n')

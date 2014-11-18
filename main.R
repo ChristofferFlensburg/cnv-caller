@@ -23,6 +23,7 @@ vcfFiles = list.files('path/to/vcfDirectory', pattern='*.vcf$', full.names=T)
 #further columns are allowed but will not be used.
 #the gene names in this file will appear in the output, so you probably want these to be with symbol names.
 #translation can for example be done with biomart.
+#gc content can be found through bedtools nuc.
 captureRegionsFile = '/path/to/captureRegions.gc.bed'
 
 #db SNP directory. hg19 can be downloaded from https://www.dropbox.com/s/nst57cbvcy9lcgg/hg19_dbSNP.zip?dl=0
