@@ -11,13 +11,13 @@ require(parallel)
 
 analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSettings) {
 
-  if ( !all('metaDataFile', 'vcfFiles', 'normalDirectory', 'captureRegionsFile', 'dbSNPdirectory') %in% names(inputFiles) )
+  if ( !all(c('metaDataFile', 'vcfFiles', 'normalDirectory', 'captureRegionsFile', 'dbSNPdirectory') %in% names(inputFiles)) )
     stop('inputFiles need all entries: metaDataFile, vcfFiles, normalDirectory, captureRegionsFile, dbSNPdirectory.')
-  if ( !all('Rdirectory', 'plotDirectory') %in% names(outputDirectories) )
+  if ( !all(c('Rdirectory', 'plotDirectory') %in% names(outputDirectories)) )
     stop('outputDirectories need all entries: Rdirectory, plotDirectory.')
-  if ( !all('BQoffset', 'genome') %in% names(settings) )
+  if ( !all(c('BQoffset', 'genome') %in% names(settings)) )
     stop('settings need all entries: BQoffset, genome.')
-  if ( !all('cpus') %in% names(runtimeSettings) )
+  if ( !all(c('cpus') %in% names(runtimeSettings)) )
     stop('runtimeSettings need all entries: cpus.')
   
   cpus = runtimeSettings$cpus
@@ -65,7 +65,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
 
   #set up logfile and log start of run.
   logFile = paste0(Rdirectory, '/runtimeTracking.log')
-  catLog = function(...) cat(..., file=logFile, append=T)
+  assign('catLog', function(...) cat(..., file=logFile, append=T), envir = .GlobalEnv)
   cat('Runtime tracking and QC information printed to ', logFile, '.\n', sep='')
   catLog(as.character(Sys.time()),
          '\n\n\n######################################################################\n',
@@ -169,7 +169,8 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   catLog(externalNormalBams, sep='\n')
   catLog('Normal vcf files are:\n')
   catLog(externalNormalVcfs, sep='\n')
-  
+
+  source('importCaptureRegions.R')
   captureRegions = try(importCaptureRegions(captureRegionsFile, gcColumn=5))
   if ( class(captureRegions) != 'GRanges' ) {
     catLog('Failed to import capture regions, aborting.\n')
@@ -192,6 +193,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   catLog('Mean GC content is ', round(mean(captureRegions$gc), 3), '.\n', sep='')
   
   #read in metadata
+  source('importSampleMetaData.R')
   sampleMetaData = try(importSampleMetaData(sampleMetaDataFile))
   if ( class(sampleMetaData) != 'data.frame' ) {
     catLog('Failed to import meta data, aborting.\n')
@@ -282,6 +284,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
       }
       
       #share variants with normals
+      source('matchFlagVariants.R')
       allVariants = try(matchFlagVariants(variants, normalVariants, individuals, normals,
         Rdirectory, v=v, forceRedoMatchFlag=forceRedoMatchFlag))
       if ( class(allVariants) == 'try-error' | !all(c('variants', 'normalVariants') %in% names(allVariants)) ) {
@@ -294,6 +297,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   normalVariants = allVariants$normalVariants
 
   #Make the scatter plots of the pairs
+  source('makeScatterPlots.R')
   scatter = try(makeScatterPlots(variants, samplePairs, timePoints, plotDirectory,
     genome=genome, cpus=cpus, v=v, forceRedo=forceRedoScatters))
   if ( class(scatter) == 'try-error' ) {
@@ -302,6 +306,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   }
   
   #identify and output new variants
+  source('outputNewVariants.R')
   newVar = try(outputNewVariants(variants, samplePairs, genome, plotDirectory, cpus=cpus, v, forceRedo=forceRedoNewVariants))
   if ( class(newVar) == 'try-error' ) {
     catLog('Error in outputNewVariants! Continuing anyway.\n')
@@ -309,6 +314,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   }
   
   #output somatic variants
+  source('outputSomaticVariants.R')
   somatics = try(outputSomaticVariants(variants, genome, plotDirectory, cpus=cpus, v, forceRedo=forceRedoOutputSomatic))
   if ( class(somatics) == 'try-error' ) {
     catLog('Error in outputSomaticVariants! Continuing anyway, but this is fairly important information.\n')
@@ -316,6 +322,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   }
   
   #do multi-sample heatmaps and frequency progression
+  source('makeSNPprogressionPlots.R')
   progression = try(makeSNPprogressionPlots(variants, timeSeries, plotDirectory, cpus=cpus, v=v, forceRedo=forceRedoSNPprogression))
   if ( class(progression) == 'try-error' ) {
     catLog('Error in makeSNPprogressionPlots! Continuing anyway, but these plots are kindof useful.\n')
@@ -323,6 +330,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   }
 
   #call CNVs compared to the normals.
+  source('callCNVs.R')
   cnvs =
     try(callCNVs(variants=variants, normalVariants=normalVariants, fitS=fitS,
                  names=names, individuals=individuals, normals=normals, Rdirectory=Rdirectory,
@@ -334,6 +342,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
 
 
   #make CNV plots
+  source('makeCNVplots.R')
   cnvplot = try(makeCNVplots(cnvs, plotDirectory=plotDirectory, genome, v=v, forceRedoCNVplots=forceRedoCNVplots))
   if ( class(cnvplot) == 'try-error' ) {
     catLog('Error in makeCNVplots! Continuing, but these plots are kindof useful.\n')
@@ -341,6 +350,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   }
 
   #make summary plots
+  source('makeSummaryPlot.R')
   summary = try(makeSummaryPlot(variants, cnvs, normals, individuals, timePoints, plotDirectory,
     genome, cpus, v, forceRedo=forceRedoSummary))
   if ( class(summary) == 'try-error' ) {
@@ -349,6 +359,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   }
 
   #combine SNPs and CNVs into stories of subclones.
+  source('getStories.R')
   setVariantLoss(normalVariants$variants, v=v)
   stories = try(getStories(variants=variants, cnvs=cnvs, timeSeries=timeSeries, Rdirectory=Rdirectory,
     plotDirectory=plotDirectory, cpus=cpus, v=v, forceRedo=forceRedoStories))
@@ -357,6 +368,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
     stop('Error in getStories!')
   }
   
+  source('makeRiverPlots.R')
   river = try(makeRiverPlots(stories, variants, plotDirectory, forceRedo=forceRedoRiver))
   if ( class(river) == 'try-error' ) {
     catLog('Error in makeRiverPlots!\n')
