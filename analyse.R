@@ -228,7 +228,9 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   catLog('\n#############################################################\n\n')
 
   #compare coverage of samples to the pool of normals, using limma-voom.
-  fitS = try(runDEforSamples(bamFiles, names, externalNormalBams, captureRegions, Rdirectory, plotDirectory,
+  source('runDE.R')
+  source('XRank.R')
+  fitS = try(runDE(bamFiles, names, externalNormalBams, captureRegions, Rdirectory, plotDirectory,
     normalRdirectory, v=v, cpus=cpus, forceRedoFit=forceRedoFit, forceRedoCount=forceRedoCount,
     forceRedoNormalCount=forceRedoNormalCount))
   if ( class('fitS') == 'try-error' ) {
@@ -242,6 +244,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   }
 
   #Plot volcanoes and output an excel file with top DE regions.
+  source('makeFitPlots.R')
   ret = try(makeFitPlots(fitS, plotDirectory, v=v,
     forceRedoVolcanoes=forceRedoVolcanoes, forceRedoDifferentRegions=forceRedoDifferentRegions))
   if ( class(ret) == 'try-error' ) {
@@ -259,6 +262,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
     else {
       #import, filter and QC the variants. Save to file.
       #The information about normals is used for QC, as there will be only true frequencies of 0, 0.5 and 1 in those samples.
+      source('getVariants.R')
       variants = try(getVariants(vcfFiles, bamFiles, names, captureRegions, genome, BQoffset,
         Rdirectory, filterBoring=T, cpus=cpus, v=v, forceRedoSNPs=forceRedoSNPs,
         forceRedoVariants=forceRedoVariants))

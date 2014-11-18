@@ -54,8 +54,3 @@ runtimeSettings = list('cpus'=cpus)
 settings = list('genome'=genome, 'BQoffset'=BQoffset)
 
 analyse(inputFiles, outputDirectories, settings, forceRedo, runtimeSettings)
-
-
-forceRedo = function() {
-
-}
