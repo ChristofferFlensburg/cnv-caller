@@ -308,7 +308,7 @@ mirrorDown = function(var, cov, vL=variantLoss()) {
 mergeChromosomes = function(cR, genome='hg19', v='', cpus=1, ...) {
   chrs = xToChr(cR$x1, genome=genome)
   #clusters = list()
-  catLog('Merging capture regions with same coverage and MAF ')
+  catLog('Merging capture regions with same coverage and MAF: ')
 
   clusters = mclapply(unique(chrs), function(chr) {
     catLog(chr, '..', sep='')
@@ -590,4 +590,105 @@ findSubclones = function(cR, v='') {
   cR = cbind(cR, subclonality, subclonalityError)
   catLog('done!\n')  
   return(cR)
+}
+
+#helper function that subsets fit objects properly, with all the extra columns.
+subsetFit = function(fit, rows=NA, cols=NA) {
+  if ( is.na(cols)[1] ) cols = 1:ncol(fit)
+  if ( is.na(rows)[1] ) rows = 1:nrow(fit)
+  fit = fit[rows,cols]
+  if ('best.guess' %in% names(fit) ) fit$best.guess = fit$best.guess[rows,cols, drop=F]
+  if ('posterior' %in% names(fit) ) fit$posterior = lapply(fit$posterior[cols], function(post) post[rows,,drop=F])
+  if ('prior' %in% names(fit) ) fit$prior[cols]
+  if ('XRank' %in% names(fit) )   fit$XRank = fit$XRank[rows, cols, drop=F]
+  if ('postWidth' %in% names(fit) ) fit$postWidth = fit$postWidth[rows, cols, drop=F]
+  if ('x' %in% names(fit) ) fit$x = fit$x[rows]
+  if ('x1' %in% names(fit) ) fit$x1 = fit$x1[rows]
+  if ('x2' %in% names(fit) ) fit$x2 = fit$x2[rows]
+  if ('chr' %in% names(fit) ) fit$chr = fit$chr[rows]
+  if ('longNames' %in% names(fit) ) fit$longNames = fit$longNames[rows]
+
+  return(fit)
+}
+
+
+#the posterior probability that two capture regions belong the same CNVinterval
+sameCNV = function(cR) {
+  if ( dim(cR)[1] < 2 ) return(1)
+
+  #find the prior from the gap lengths
+  first = 1:(nrow(cR)-1)
+  second = 2:nrow(cR)
+  dx = abs(cR$x1[second] - cR$x2[first])
+  prior = exp(-dx*CNVregionsPerBP())
+
+  #find the probabilities of getting measure values if the SNP frequencies are equal
+  f = (cR$var[first] + cR$var[second])/(cR$cov[first] + cR$cov[second])
+  p1 = dbinom(cR$var[first], cR$cov[first], f)
+  p2 = dbinom(cR$var[second], cR$cov[second], f)
+  
+  #get posterior using the dx-based prior above. alternative hypothesis is a flat distribution on the frequency.
+  postF1 = prior*p1/(prior*p1 + (1-prior)/(1+cR$cov[first]))
+  postF2 = prior*p2/(prior*p2 + (1-prior)/(1+cR$cov[second]))
+  postF = sqrt(postF1*postF2)
+  noFreq = cR$cov[first] == 0 | cR$cov[second] == 0
+
+  #find the probability densities (P*dM) of getting measure values if the regions have the same fold change
+  meanM = (cR$M[first]/cR$width[first]^2 + cR$M[second]/cR$width[second]^2)/(1/cR$width[first]^2 + 1/cR$width[second]^2)
+  MP1 = pt(-abs(cR$M[first] - meanM)/cR$width[first], df = cR$df[first])
+  MP2 = pt(-abs(cR$M[second] - meanM)/cR$width[second], df = cR$df[second])
+
+  #get probability densities for alternative hypothesis: a fold change of at least 1.3 in either direction.
+  meanMAup = (cR$M[first]/cR$width[first]^2 + (cR$M[second]+log2(1.3))/cR$width[second]^2)/(1/cR$width[first]^2 + 1/cR$width[second]^2)
+  MP1Aup = pt(-abs(cR$M[first] - meanMAup)/cR$width[first], df = cR$df[first])
+  MP2Aup = pt(-abs((cR$M[second]+log2(1.3)) - meanMAup)/cR$width[second], df = cR$df[second])
+  meanMAdown = (cR$M[first]/cR$width[first]^2 + (cR$M[second]-log2(1.3))/cR$width[second]^2)/(1/cR$width[first]^2 + 1/cR$width[second]^2)
+  MP1Adown = pt(-abs(cR$M[first] - meanMAdown)/cR$width[first], df = cR$df[first])
+  MP2Adown = pt(-abs((cR$M[second]-log2(1.3)) - meanMAdown)/cR$width[second], df = cR$df[second])
+
+  diffM = abs(cR$M[first] - cR$M[second]) > log2(1.3)
+  MP1Aup[diffM] = MP2Aup[diffM] = 1
+  MP1Adown[diffM] = MP2Adown[diffM] = 0
+
+
+  #get posteriors, and take average
+  postM1 = prior*MP1/(prior*MP1 + (1-prior)*(MP1Aup+MP1Adown)/2)
+  postM2 = prior*MP2/(prior*MP2 + (1-prior)*(MP2Aup+MP2Adown)/2)
+  postM = sqrt(postM1*postM2)
+
+  post = sapply(first, function(i) if ( noFreq[i] ) postM[i] else fisherTest(c(postM[i], postF[i]))[2])
+  names(post) = cR$x1[first]
+
+  return(post)
+}
+
+#prior of density of CNV region breakpoints. This corresponds to around 30 breakpoints in a sample.
+CNVregionsPerBP = function() {return(1/1e8)}
+
+#helper function doing the stouffer Test
+stoufferTest = function(p, w) {
+  if (missing(w)) {
+    w <- rep(1, length(p))/length(p)
+  } else {
+    if (length(w) != length(p))
+      stop("Length of p and w must equal!")
+  }
+  Zi <- qnorm(1-p) 
+  Z  <- sum(w*Zi)/sqrt(sum(w^2))
+  p.val <- 1-pnorm(Z)
+  return(c(Z = Z, p.value = p.val))
+}
+
+#helper function calculating the posterior of clonalities being the same
+sameClone = function(clonality, error, prior = 0.99) {
+  first = 1:(length(clonality)-1)
+  second = 2:length(clonality)
+  
+  totalError = sqrt(error[first]^2 + error[second]^2)
+  sigma = abs(clonality[first]-clonality[second])/totalError
+  pval = 2*pnorm(-sigma, mean=0, sd=1)
+  #alternative hypothesis is a flat distribution on difference in clonality from -0.5 to 0.5.
+  post = pval*prior/(pval*prior + totalError*(1-prior))
+
+  return(post)
 }

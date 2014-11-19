@@ -58,11 +58,36 @@ BQoffset = 33
 #the reference genome. Only hg19 is supported this release.
 genome = 'hg19'
 
+#grouping up settings and metadata
 inputFiles = list('metaDataFile'=metaDataFile, 'vcfFiles'=vcfFiles, 'normalDirectory'=normalDirectory,
   'captureRegionsFile'=captureRegionsFile, 'dbSNPdirectory'=dbSNPdirectory)
 outputDirectories = list('Rdirectory'=Rdirectory, 'plotDirectory'=plotDirectory)
-runtimeSettings = list('cpus'=cpus)
+runtimeSettings = list('cpus'=cpus, 'outputToTerminalAsWell'=T)
 settings = list('genome'=genome, 'BQoffset'=BQoffset)
+
+#If you want to redo any step of the analysis, rather than loading saved results which is default,
+#turn the corresponding switch to T.
+#Depending steps will be redone as well.
+forceRedo = list(
+  'forceRedoCount'=T,
+  'forceRedoNormalCount'=T,
+  'forceRedoFit'=F,
+  'forceRedoVolcanoes'=F,
+  'forceRedoDifferentRegions'=F,
+  'forceRedoSNPs'=T,
+  'forceRedoVariants'=F,
+  'forceRedoNormalSNPs'=F,
+  'forceRedoNormalVariants'=F,
+  'forceRedoMatchFlag'=F,
+  'forceRedoScatters'=F,
+  'forceRedoOutputSomatic'=F,
+  'forceRedoNewVariants'=F,
+  'forceRedoSNPprogression'=F,
+  'forceRedoCNV'=F,
+  'forceRedoCNVplots'=F,
+  'forceRedoSummary'=F,
+  'forceRedoStories'=F,
+  'forceRedoRiver'=F)
 
 source('analyse.R')
 analyse(inputFiles, outputDirectories, settings, forceRedo, runtimeSettings)

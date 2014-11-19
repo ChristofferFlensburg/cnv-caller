@@ -148,3 +148,8 @@ plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome,
   if ( length(print) > 0 ) invisible(print[order(geneX)])
   invisible(c())
 }
+
+#scalar product of the two normalsied vectors x and y.
+scalarNorm = function(x, y) {
+  return(sum(x*y)/norm(x)/norm(y))
+}

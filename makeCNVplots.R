@@ -130,3 +130,47 @@ plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', al
     segments(cR$x1, y, cR$x2, y, lwd=pmax(0.2, pmin(2, 0.05/error)), col=col)
   }
 }
+
+#helper function that adds vertical chromsome lines to a plot on the genomic x coordinate.
+addChromosomeLines = function(ylim = c(0, 1), col = 'red', cex=1, genome='hg19',...) {
+  lim = c(0, cumsum(chrLengths(genome=genome)))
+  segments(lim, ylim[1], lim, ylim[2], col=col, cex=cex, ...)
+  text((lim[-1] + lim[-length(lim)])/2, ylim[2], names(chrLengths(genome=genome)), col=col, cex=cex)
+}
+
+#Helper function that returns a colour (or line type) depending on the provided index. Cyclic.
+#colours (with the no-black option) and line types have cycles of 6 and 7, so shouldn't repeat until index 43.
+randomLtys = function( i ) {
+  ltys = c(1,3,5,4,2,6)
+  return(ltys[1+(i-1)%%length(ltys)])
+}
+randomCol = function( i, a=1, noBlack=F ) {
+  cols = c(rgb(1,0,0,a), rgb(0,0,1,a), rgb(0, 0.7,0,a), rgb(0,0,0,a), rgb(0.9, 0.6,0,a), rgb(0.9,0,0.9,a), rgb(0,0.8,0.7,a),
+    rgb(0.6,0.6,0.6,a))
+  if ( noBlack ) cols = cols[-c(4,8)]
+  return(cols[1+(i-1)%%length(cols)])
+}
+randomCols = function(i, a=1, noBlack=F) {
+  if ( length(a)==1 & length(i) > 1 ) a = rep(a, length(i))
+  if ( length(i) != length(a) ) cat('randomCols wants colour index and alpha of same length! >:(\n')
+  return(sapply(1:length(i), function(I) randomCol(i[I], a[I], noBlack=noBlack)))
+}
+
+#helper wrappers of colSums etc that handle non-matrices.
+colsums = function(mx) {
+  if ( !is.matrix(mx) ) return(mx)
+  else (colSums(mx))
+}
+rowsums = function(mx) {
+  if ( !is.matrix(mx) ) return(mx)
+  else (rowSums(mx))
+}
+colmeans = function(mx) {
+  if ( !is.matrix(mx) ) return(mx)
+  else (colMeans(mx))
+}
+rowmeans = function(mx) {
+  if ( !is.matrix(mx) ) return(mx)
+  else (rowMeans(mx))
+}
+

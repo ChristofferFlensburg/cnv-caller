@@ -141,3 +141,94 @@ qualityProgression = function(qs, SNPs, db=T, nondb=T, excelFile='', main='', v=
   }
   
 }
+
+#helper function that calculates p-values for a sum of two binomials symmetric around 0.5
+pTwoBinom = function(cov, var, f) {
+  use = cov > 0 & var >= 0
+  p = rep(1, length(cov))
+  if ( length(f) == 1 ) f = rep(f, length(cov))
+  cov = cov[use]
+  var = var[use]
+  f = f[use]
+  if ( length(f) != length(cov) | length(var) != length(cov) ) cat('Length of f must match length of cov, or be 1.\n')
+  f = pmin(f, refBiasMirror(f))
+  fM = refBiasMirror(f)
+  var = mirrorDown(var, cov)
+
+  midPoints = twoBinom(round(cov*refBias(0.5)), cov, f, fM)
+  density =twoBinom(var, cov, f, fM)
+  outside = density < midPoints & var < cov*refBias(0.5)
+  p = rep(1, length(var))
+  if ( any(outside) ) {
+    vo = var[outside]
+    co = cov[outside]
+    fo = f[outside]
+    foM = fM[outside]
+    p[outside] = pbinom(vo, co, fo)+pbinom(vo, co, foM) - twoBinom(vo, co, fo, foM)
+  }
+  if ( any(!outside) ) {
+    vi = var[!outside]
+    ci = cov[!outside]
+    fi = f[!outside]
+    viMirror = findMirror(vi, ci, fi)
+    viLow = pmin(vi, viMirror)
+    viHigh = pmax(vi, viMirror)
+    p[!outside] = (pbinom(viLow, ci, fi) + pbinom(viLow, ci, 1-fi)) - (dbinom(viLow, ci, fi)+dbinom(viLow, ci, 1-fi))/2 +
+      (pbinom(ci-viHigh, ci, fi) - pbinom(viHigh, ci, fi)) - (dbinom(ci-viHigh, ci, fi) - dbinom(viHigh, ci, fi))/2
+  }
+  p = pmin(1, p)    #rounding can give p-values just above 1. Move these down to 1.
+  return(p)
+}
+
+#helper function, sum of two binomials
+twoBinom = function(V, C, F1, F2) (dbinom(V, C, F1) + dbinom(V, C, F2))/2
+
+#helper function, finding the other root of a sum of two binomials minus a constant.
+findMirror = function(var, cov, f) {
+  fM = refBiasMirror(f)
+  #first guess for the mirror
+  m = round(pmax(0, pmin(cov*refBias(0.5), 2*f*cov - var)))
+  y = twoBinom(m, cov, f, fM)
+  #target probability density to reach
+  y0 = twoBinom(var, cov, f, fM)
+  converged = rep(F, length(var))
+  solutions = rep(0, length(var))
+  while ( any(!converged) ) {
+    tooLow = y < y0
+    mnew = m - sign(y-y0)*sign(var-f*cov)
+    ynew = twoBinom(mnew, cov, f, fM)
+    solved = sign(y-y0) != sign(ynew-y0) | y == y0 
+
+    #handle converged cases
+    if ( any(solved) ) {
+      solutions[which(!converged)[solved]] = ifelse(abs(y-y0)[solved] < abs(ynew-y0)[solved], m[solved], mnew[solved])
+      converged[which(!converged)[solved]] = rep(T, sum(solved))
+    }
+
+    #update not converged cases, removing solved values
+    m = mnew[!solved]
+    y = ynew[!solved]
+    y0 = y0[!solved]
+    cov = cov[!solved]
+    var = var[!solved]
+    f = f[!solved]
+    fM = fM[!solved]
+  }
+  return(solutions)
+}
+
+#helper function that picks a colour based on statistical weight, importance and hue.
+#weight sets opaqueness, importance sets saturation, and hue sets the colour.
+D3colours = function(weights, importances, hues) {
+  return(apply(cbind(weights, importances, hues), 1, D3colour))
+}
+
+D3colour = function(D3) {
+  weight = D3[1]
+  importance = D3[2]
+  hue = D3[3]
+  x = 6*hue
+  rgb = pmin(1, c(noneg(2-x)+noneg(x-4), noneg(x-noneg(2*x-4)), noneg(x-2-noneg(2*x-8))))
+  rgb = 0.1*(1-importance) + rgb*importance
+  return(rgb(rgb[1], rgb[2], rgb[3], weight))
+}

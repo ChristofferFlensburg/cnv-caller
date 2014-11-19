@@ -216,3 +216,36 @@ findCorrespondingNormal = function(names, individuals, normals) {
   names(ret) = names
   return(ret)
 }
+
+#calculates the p-value from a two-tailed binomial.
+pBinom = function(cov, var, f) {
+  use = cov > 0 & var >= 0
+  p = rep(1, length(cov))
+  if ( length(f) == 1 ) f = rep(f, length(cov))
+  if ( length(f) != length(cov) | length(var) != length(cov) )
+    cat('Length of f', length(f), 'must match length of cov', length(cov), 'or be 1.\n')
+  p[use] = pbinom(var[use], cov[use], f[use]) -  dbinom(var[use], cov[use], f[use])/2
+  p[use] = 2*pmin(p[use], 1-p[use])
+  return(p)
+}
+
+#helper function that matches variants between two SNPs objects
+shareSNPs = function(SNPs1, SNPs2) {
+  newX = setdiff(SNPs2$x, SNPs1$x1)
+  newSNPs = SNPs2[as.character(newX),]
+  newSNPs$reads = newSNPs$readsReference = newSNPs$readsVariant = newSNPs$frequency = 0
+  newSNPs$referencePlus = newSNPs$referenceMinus = newSNPs$variantPlus = newSNPs$variantMinus = 0
+  newSNPs$frequency = -0.02
+  newSNPs$pValue = newSNPs$filterPValue = 1
+  newSNPs$ref = newSNPs$het = newSNPs$hom = 0
+  newSNPs$nc = max(SNPs1$ref+SNPs1$het+SNPs1$hom+SNPs1$nc)
+  return(rbind(SNPs1, newSNPs))
+}
+
+#helper function combining p-values using fishers method.
+fisherTest = function(p) {
+  p = p[!is.na(p)]
+  Xsq = -2*sum(log(p))
+  pVal = 1-pchisq(Xsq, df = 2*length(p))
+  return(c(Xsq = Xsq, pVal = pVal))
+}

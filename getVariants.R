@@ -1,6 +1,7 @@
 require(Rsamtools)
 require(parallel)
 require(GenomicRanges)
+require(R.oo)
 
 #Takes a set of vcf files and corresponding bam files and capture regions.
 #The function filters variants outside of the capture regions, and a few other filters.
@@ -78,14 +79,14 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
     save(variants, file=variantsSaveFile)
     catLog('done.\n')
 
-    catLog('Plotting frequency distributions..')
     diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
     if ( !file.exists(diagnosticPlotsDirectory) ) dir.create(diagnosticPlotsDirectory)
     FreqDirectory = paste0(diagnosticPlotsDirectory, '/frequencyDistribution/')
+    catLog('Plotting frequency distributions to ', FreqDirectory,'..', sep='')
     if ( !file.exists(FreqDirectory) ) dir.create(FreqDirectory)
     for ( sample in names(variants) ) {
       catLog(sample, '..', sep='')
-      png(paste0(MAdirectory, col, '.png'), height=2000, width=4000, res=144)
+      png(paste0(FreqDirectory, sample, '.png'), height=2000, width=4000, res=144)
       use = variants[[sample]]$cov > 0
       plotColourScatter(variants[[sample]]$var/variants[[sample]]$cov, variants[[sample]]$cov,
                         log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
@@ -191,6 +192,10 @@ matchTodbSNPs = function(SNPs, dir='~/data/dbSNP', genome='hg19') {
       if ( chr %in% SNPs$chr ) SNPs$db[SNPs$chr == chr] = F
       next
     }
+    if ( !any(SNPs$chr == chr) ) {
+      catLog('Chromosome ', chr, ': no SNPs found in this chromosome, done.\n', sep='')
+      next
+    }
     RsaveFile = paste0(dir,'/chr', chr, '.Rdata')
     if ( !file.exists(RsaveFile) ) {
       catLog('Chromosome ', chr, ': loading dbSNPs..', sep='')
@@ -207,9 +212,7 @@ matchTodbSNPs = function(SNPs, dir='~/data/dbSNP', genome='hg19') {
     }
     catLog('matching to sample postions..')
     chrSNPsI = which(SNPs$chr == chr)
-    if ( length(chrSNPsI) > 0 )
-      SNPs$db[chrSNPsI] = (SNPs$start[chrSNPsI] + ifelse(grepl('[-]', SNPs$variant[chrSNPsI]), 1, 0)) %in% dbPos
-    else catLog('no SNPs found in this chromosome..')
+    SNPs$db[chrSNPsI] = (SNPs$start[chrSNPsI] + ifelse(grepl('[-]', SNPs$variant[chrSNPsI]), 1, 0)) %in% dbPos
     catLog('done.\n')
   }
   return(SNPs)
@@ -580,4 +583,14 @@ shareVariants = function(variants, v='') {
   })
   if ( v == 'trackProgress' ) cat('done!\n')      
   return(variants)
+}
+
+#helper function that marks the SNPs with the gene they are in.
+inGene = function(SNPs, genes, noHit = NA, genome='hg19') {
+  SNPsGR = SNP2GRanges(SNPs, genome=genome)
+  hits = findOverlaps(SNPsGR, genes)
+  inGene = rep(noHit, length(SNPsGR))
+  inGene[queryHits(hits)] = names(genes)[subjectHits(hits)]
+  SNPs$inGene = inGene
+  return(SNPs)
 }

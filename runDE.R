@@ -421,3 +421,6 @@ plotColourScatter = function(x, y, xlab='', ylab='', col=mcri('darkblue'), main=
   points(x, y, cex=cex*0.3, pch=16, col=mcri('azure', 0.1))
   points(x, y, cex=cex*0.2, pch=16, col=mcri('green', 0.02))
 }
+
+#helper function that replaces negative values with 0.
+noneg = function(x) return(ifelse(x < 0, 0, x))

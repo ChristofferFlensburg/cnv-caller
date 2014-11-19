@@ -304,17 +304,17 @@ freqToDirectionProb = function(freq, freqX, f, clonality) {
   upProb = function(x) {
     j = which(freq$x == x)
     if ( length(j) == 0 ) return(1)
-    return(pvals(freq$cov[j], freq$var[j], 0.5 + (0.5-f)*clonality))
+    return(pBinom(freq$cov[j], freq$var[j], 0.5 + (0.5-f)*clonality))
   }
   downProb = function(x) {
     j = which(freq$x == x)
     if ( length(j) == 0 ) return(1)
-    return(pvals(freq$cov[j], freq$var[j], 0.5 - (0.5-f)*clonality))
+    return(pBinom(freq$cov[j], freq$var[j], 0.5 - (0.5-f)*clonality))
   }
   nullProb = function(x) {
     j = which(freq$x == x)
     if ( length(j) == 0 ) return(1)
-    return(pvals(freq$cov[j], freq$var[j], 0.5))
+    return(pBinom(freq$cov[j], freq$var[j], 0.5))
   }
   u = sapply(freqX, function(x) upProb(x))
   d = sapply(freqX, function(x) downProb(x))
@@ -396,6 +396,7 @@ pairScore = function(stories, is, js) {
   return(rms + noneg(rms - unpairedRms) )
 }
 
+#defines a metric between two stories
 storyDistance = function(story1, story2) {
   stories = rbind(story1, story2)
   err = stories$errors
@@ -406,4 +407,49 @@ storyDistance = function(story1, story2) {
   rms = sqrt(mean(sigma^2))
 
   return(rms)
+}
+
+#helper function that decided which subclones are subclones of each other.
+findCloneTree = function(cloneStories) {
+  #add the purity as a story (this may or may not already be present)
+  purity = sapply(1:ncol(cloneStories$stories), function(i) max(cloneStories$stories[,i]))
+  #check which clones are subclones of which others, allowing an error bar from each clone.
+  subcloneMx = apply(abs(cloneStories$stories) + cloneStories$errors, 1,
+    function(story1) apply(abs(cloneStories$stories) - cloneStories$errors, 1,
+                           function(story2) all(story1 > story2)))
+  greaterSum = apply(abs(cloneStories$stories), 1,
+    function(story1) apply(abs(cloneStories$stories), 1,
+                           function(story2) sum(story1) > sum(story2)))
+  subcloneMx = subcloneMx & greaterSum
+
+  subcloneStories = cloneStories$stories
+  rownames(subcloneMx) = colnames(subcloneMx) = rownames(subcloneStories) = rownames(cloneStories)
+
+  cloneTree = list('all'=findChildren(subcloneMx, subcloneStories))
+
+  return(cloneTree)
+}
+#helper function
+findChildren = function(subcloneMx, subcloneStories) {
+  #if no more subclones, return empty list
+  if ( nrow(subcloneStories) == 0 ) return(list())
+
+  #there will be at least one clone that is not a subclone (aka paranetless, the one with the largest clonality sum)
+  is = which(rowSums(subcloneMx) == 0)
+  cloneNames = rownames(subcloneStories)[is]
+  #score the parentless subclones from the sum of clonalities.
+  cloneScores = rowSums(abs(subcloneStories))[is]
+  cloneScores = sort(cloneScores, decreasing=T)
+
+  #go through the parentless clones in order of score, each one recurring with its subclones.
+  ret = list()
+  for ( clone in names(cloneScores) ) {
+    subclones = subcloneMx[,clone]
+    if ( !any(subclones) ) ret[[clone]] = list()
+    else ret[[clone]] = findChildren(subcloneMx[subclones, subclones, drop=F], subcloneStories[subclones,,drop=F])
+    subcloneMx = subcloneMx[!subclones, !subclones, drop=F]
+    subcloneStories = subcloneStories[!subclones,,drop=F]
+  }
+
+  return(ret)
 }

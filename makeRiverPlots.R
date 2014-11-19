@@ -155,3 +155,33 @@ addStreamSegment = function(x1, x2, y1low, y1high, y2low, y2high, range=c(0,1), 
   }
   polygon(c(x, rev(x)), c(yhigh, rev(pmin(ylow, yhigh))), col=col, border=NA)
 }
+
+
+plotStories = function(stories, col='default') {
+  names = rownames(stories)
+  clon = stories$stories
+  ce = stories$errors
+
+  Nsample = ncol(clon)
+  Nmut = nrow(clon)
+
+  if ( col[1] == 'default' ) {
+    segcol = randomCols(row(clon)[,2:Nsample])
+    errcol = randomCols(row(clon))
+  }
+  else if ( length(col) == Nmut ) {
+    segcol = rep(col, Nsample-1)
+    errcol = rep(col, Nsample)
+  }
+
+  plot(0,0, type='n', xlim=c(1, Nsample), ylim=c(min(0, min(clon)),1))
+  lwd = 1/(sqrt(0.1^2+ce[,1:(Nsample-1)]^2 + ce[,2:Nsample]^2)/0.2)^2
+  segments(col(clon)[,1:(Nsample-1)]+(row(clon)[,1:(Nsample-1)] - Nmut/2)/Nmut/4, clon[,1:(Nsample-1)],
+           col(clon)[,2:Nsample    ]+(row(clon)[,2:Nsample    ] - Nmut/2)/Nmut/4, clon[,2:Nsample    ],
+           col=segcol, lwd=lwd)
+  lwd = 1/(sqrt(0.1^2+ce^2)/0.2)^2
+  segments(col(clon)+(row(clon) - Nmut/2)/Nmut/4, clon - ce,
+           col(clon)+(row(clon) - Nmut/2)/Nmut/4, clon + ce,
+           col=errcol, lwd=lwd)
+
+}

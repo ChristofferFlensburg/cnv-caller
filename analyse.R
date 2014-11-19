@@ -21,6 +21,8 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
     stop('runtimeSettings need all entries: cpus.')
   
   cpus = runtimeSettings$cpus
+  outputToTerminalAsWell = runtimeSettings$outputToTerminalAsWell
+  
   genome = settings$genome
   sampleMetaDataFile = inputFiles$metaDataFile
   vcfFiles = inputFiles$vcfFiles
@@ -66,9 +68,12 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   #set up logfile and log start of run.
   logFile = paste0(Rdirectory, '/runtimeTracking.log')
   assign('catLog', function(...) cat(..., file=logFile, append=T), envir = .GlobalEnv)
+  if ( outputToTerminalAsWell )
+    assign('catLog', function(...) {cat(..., file=logFile, append=T); cat(...)}, envir = .GlobalEnv)
+
   cat('Runtime tracking and QC information printed to ', logFile, '.\n', sep='')
-  catLog(as.character(Sys.time()),
-         '\n\n\n######################################################################\n',
+  catLog('\n\n\n', as.character(Sys.time()),
+         '\n######################################################################\n',
          'Starting run with input files:',
          '\nsampleMetaDataFile:', sampleMetaDataFile,
          '\nvcfFiles:\n')
@@ -83,35 +88,30 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
 
   if ( !(genome %in% c('hg19', 'mm10')) ) stop('Only genomes that are supported atm are hg19 and mm10, sorry.\nNew genomes can easily be added though, please contact the authors.\n')
 
+
+
   #set forceRedo parameters to false unless already specified
-  if ( !exists('forceRedoAgilentCaptureNames') ) forceRedoAgilentCaptureNames = F
-  if ( !exists('forceRedoCount') ) forceRedoCount = F
-  if ( !exists('forceRedoNormalCount') ) forceRedoNormalCount = F
-  if ( !exists('forceRedoFit') ) forceRedoFit = F
-  if ( !exists('forceRedoVolcanoes') ) forceRedoVolcanoes = F
-  if ( !exists('forceRedoDifferentRegions') ) forceRedoDifferentRegions = F
-  if ( !exists('forceRedoSNPs') ) forceRedoSNPs = F
-  if ( !exists('forceRedoVariants') ) forceRedoVariants = F
-  if ( !exists('forceRedoNormalSNPs') ) forceRedoNormalSNPs = F
-  if ( !exists('forceRedoNormalVariants') ) forceRedoNormalVariants = F
-  if ( !exists('forceRedoMatchFlag') ) forceRedoMatchFlag = F
-  if ( !exists('forceRedoScatters') ) forceRedoScatters = F
-  if ( !exists('forceRedoOutputSomatic') ) forceRedoOutputSomatic = F
-  if ( !exists('forceRedoNewVariants') ) forceRedoNewVariants = F
-  if ( !exists('forceRedoSNPprogression') ) forceRedoSNPprogression = F
-  if ( !exists('forceRedoCNV') ) forceRedoCNV = F
-  if ( !exists('forceRedoCNVplots') ) forceRedoCNVplots = F
-  if ( !exists('forceRedoSummary') ) forceRedoSummary = F
-  if ( !exists('forceRedoStories') ) forceRedoStories = F
-  if ( !exists('forceRedoRiver') ) forceRedoRiver = F
+  forceRedoCount = forceRedo$forceRedoCount
+  forceRedoNormalCount = forceRedo$forceRedoNormalCount
+  forceRedoFit = forceRedo$forceRedoFit
+  forceRedoVolcanoes = forceRedo$forceRedoVolcanoes
+  forceRedoDifferentRegions = forceRedo$forceRedoDifferentRegions
+  forceRedoSNPs = forceRedo$forceRedoSNPs
+  forceRedoVariants = forceRedo$forceRedoVariants
+  forceRedoNormalSNPs = forceRedo$forceRedoNormalSNPs
+  forceRedoNormalVariants = forceRedo$forceRedoNormalVariants
+  forceRedoMatchFlag = forceRedo$forceRedoMatchFlag
+  forceRedoScatters = forceRedo$forceRedoScatters
+  forceRedoOutputSomatic = forceRedo$forceRedoOutputSomatic
+  forceRedoNewVariants = forceRedo$forceRedoNewVariants
+  forceRedoSNPprogression = forceRedo$forceRedoSNPprogression
+  forceRedoCNV = forceRedo$forceRedoCNV
+  forceRedoCNVplots = forceRedo$forceRedoCNVplots
+  forceRedoSummary = forceRedo$forceRedoSummary
+  forceRedoStories = forceRedo$forceRedoStories
+  forceRedoRiver = forceRedo$forceRedoRiver
 
 #make sure that if something is redone, then all depending steps are redone as well
-  if ( forceRedoAgilentCaptureNames ) {
-    catLog('Redoing capture regions, so need to redo coverage counts and SNPs as well.\n')
-    forceRedoCount = T
-    forceRedoNormalCount = T
-    forceRedoSNPs = T
-  }
   if ( forceRedoCount ) {
     catLog('Redoing coverage counts, so need to redo linear analysis.\n')
     forceRedoFit = T
@@ -221,12 +221,12 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
          as.character(Sys.time()),'\n',
          'Imported and sanity checked meta data. Looking good so far!\n',
          'metadata:\n')
-  catLog(colnames(sampleMetaData), '\n', sep='   ')
+  catLog('',colnames(sampleMetaData), '\n', sep='   ')
   for ( row in 1:nrow(sampleMetaData) )
-    catLog(as.matrix(sampleMetaData[row,]), '\n', sep='   ')
-  catLog('\ntimeSeries:\n')
+    catLog('',as.matrix(sampleMetaData[row,]), '\n', sep='   ')
+  catLog('\n timeSeries:\n')
   for ( ts in timeSeries )
-    catLog(ts, '\n', sep='   ')
+    catLog('',ts, '\n', sep='   ')
   catLog('\n#############################################################\n\n')
 
   #compare coverage of samples to the pool of normals, using limma-voom.
@@ -255,6 +255,8 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   }
 
 
+  source('getVariants.R')
+  source('matchFlagVariants.R')
   saveFile = paste0(Rdirectory, '/allVariants.Rdata')
   {
     if ( file.exists(saveFile) & !forceRedoMatchFlag & !forceRedoVariants & !forceRedoNormalVariants ) {
@@ -264,7 +266,6 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
     else {
       #import, filter and QC the variants. Save to file.
       #The information about normals is used for QC, as there will be only true frequencies of 0, 0.5 and 1 in those samples.
-      source('getVariants.R')
       variants = try(getVariants(vcfFiles, bamFiles, names, captureRegions, genome, BQoffset, dbSNPdirectory,
         Rdirectory, plotDirectory, filterBoring=T, cpus=cpus, v=v, forceRedoSNPs=forceRedoSNPs,
         forceRedoVariants=forceRedoVariants))
@@ -284,7 +285,6 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
       }
       
       #share variants with normals
-      source('matchFlagVariants.R')
       allVariants = try(matchFlagVariants(variants, normalVariants, individuals, normals,
         Rdirectory, v=v, forceRedoMatchFlag=forceRedoMatchFlag))
       if ( class(allVariants) == 'try-error' | !all(c('variants', 'normalVariants') %in% names(allVariants)) ) {
@@ -375,6 +375,6 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
     warning('Error in makeRiverPlots!')
   }
 
-  catLog('Run done! :)')
+  catLog('Run done! Have fun with the output! :)\n\n')
   return()
 }
