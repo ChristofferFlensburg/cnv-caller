@@ -78,46 +78,6 @@ callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVarian
 }
 
 
-setVariantLoss = function(variants, maxLoops = 99, v='') {
-  #if called with several samples, take average
-  if ( class(variants) == 'list' ) {
-    vL = mean(unlist(lapply(variants, function(var) setVariantLoss(var, maxLoops=maxLoops, v=''))))
-    assign('.variantLoss', vL, envir = .GlobalEnv)
-    catLog('Average variant loss is', vL, '\n')
-    return(.variantLoss)
-  }
-
-  rawF = variants$var/variants$cov
-  loops = 0
-  assign('.variantLoss', 0, envir = .GlobalEnv)
-  while(T) {
-    loops = loops + 1
-    f = refUnbias(rawF)
-    use = !is.na(f) & abs(f-0.5) < 0.3 & variants$flag == '' & pBinom(variants$cov, variants$var, refBias(0.5)) > 0.01
-    observedMean = sum(variants$var[use])/sum(variants$cov[use])
-    if ( sum(use) == 0 ) {
-      observedMean = 0.5
-      warning('Ran out of het SNPs after', loops, 'iterations. Will not cancel reference bias.')
-      assign('.variantLoss', 0.5, envir = .GlobalEnv)
-      break
-    }
-    passedVariants = observedMean/(1-observedMean)
-    vL = 1 - passedVariants
-    if ( vL - variantLoss() < 0.00001 ) {
-      catLog('Variant loss converged to', vL, 'after', loops, 'iterations.\n')
-      assign('.variantLoss', vL, envir = .GlobalEnv)
-      break
-    }
-    assign('.variantLoss', vL, envir = .GlobalEnv)
-    if ( loops > maxLoops ) {
-      warning('Iterated to find variant loss', loops, 'times without converging. Will not cancel reference bias. This may affect the quality of CNV calls.')
-      assign('.variantLoss', 0.5, envir = .GlobalEnv)
-      break
-    }
-  }
-  return(.variantLoss)
-}
-
 #helper function that selects germline het SNPs in the presence of a normal sample from the same individual.
 selectGermlineHets = function(normalVariants, moreNormalVariants, minCoverage = 10, v='', cpus=1) {
   #only bother with variants that have enough coverage so that we can actually see a change in frequency
@@ -284,25 +244,6 @@ unifyCaptureRegions = function(variants, fit, cpus=1) {
   return(cR)
 }
 
-#fetches the estimated loss of variants in alignment etc.
-variantLoss = function() {return(.variantLoss)}
-
-#helper functions that handles reference bias.
-refBias = function(f, vL=variantLoss()) {
-  return(f*(1-vL)/(f*(1-vL) + 1-f))
-}
-refUnbias = function(f, vL=variantLoss()) {
-  return(f/(1-vL)/(f/(1-vL) + 1-f))
-}
-refBiasMirror = function(f, vL=variantLoss()) {
-  return(refBias(1 - refUnbias(f, vL), vL))
-}
-mirrorDown = function(var, cov, vL=variantLoss()) {
-  f = var/cov
-  var = ifelse(f > refBias(0.5, vL), cov*refBiasMirror(f, vL), var)
-  var[cov == 0] = 0
-  return(round(var))
-}
 
 #merges regions in each chromosome.
 mergeChromosomes = function(cR, genome='hg19', v='', cpus=1, ...) {

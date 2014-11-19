@@ -88,7 +88,7 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
       catLog(sample, '..', sep='')
       png(paste0(FreqDirectory, sample, '.png'), height=2000, width=4000, res=144)
       use = variants[[sample]]$cov > 0
-      plotColourScatter(variants[[sample]]$var/variants[[sample]]$cov, variants[[sample]]$cov,
+      plotColourScatter(variants[[sample]]$var/variants[[sample]]$cov[use], variants[[sample]]$cov[use],
                         log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
       hist(variants[[sample]]$var/variants[[sample]]$cov, breaks=(0:100)/100, col=mcri('blue'))
       dev.off()
@@ -181,30 +181,16 @@ flagStrandBias = function(SNPs) {
 #hepler function that marks the variants in a SNPs object as db or non db SNPs.
 matchTodbSNPs = function(SNPs, dir='~/data/dbSNP', genome='hg19') {
   SNPs$db = rep(NA, nrow(SNPs))
-  if ( genome == 'hg19' ) chrs = names(humanChrLengths())
-  else if ( genome == 'mm10' ) {
-    chrs = names(mouseChrLengths())
-    dir = '~/data/dbSNP/mm10'
-  }
+ chrs = names(chrLengths())
   for (chr in chrs ) {
-    if ( !file.exists(paste0(dir,'/ds_flat_ch', chr, '.dbSNP')) ) {
-      catLog('File not found for chromosome ', chr, '! Marking all as not db SNPs.\n')
-      if ( chr %in% SNPs$chr ) SNPs$db[SNPs$chr == chr] = F
-      next
-    }
     if ( !any(SNPs$chr == chr) ) {
       catLog('Chromosome ', chr, ': no SNPs found in this chromosome, done.\n', sep='')
       next
     }
     RsaveFile = paste0(dir,'/chr', chr, '.Rdata')
     if ( !file.exists(RsaveFile) ) {
-      catLog('Chromosome ', chr, ': loading dbSNPs..', sep='')
-      db = read.table(paste0(dir,'/ds_flat_ch', chr, '.dbSNP'), header = T, fill=T)
-      catLog('extracting positions..')
-      db = db[db$pos != '?',] #without position, the dbSNP is useless
-      dbPos = unique(db$pos)
-      catLog('saving positions for future use..')
-      save('dbPos', file=RsaveFile)
+      catLog('Chromosome ', chr, ': no SNP file found at', RsaveFile,'. Marking all as not dbSNP.\n', sep='')
+      warning('dbSNP file not found!')
     }
     else {
       catLog('Chromosome ', chr, ': loading db positions..')

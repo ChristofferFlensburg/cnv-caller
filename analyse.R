@@ -79,6 +79,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
          '\nvcfFiles:\n')
   catLog(vcfFiles, sep='\n')
   catLog('Normal directory:', normalDirectory, '\n')
+  catLog('dbSNP directory:', dbSNPdirectory, '\n')
   catLog('capture regions:', captureRegionsFile, '\n')
   catLog('Plotting to', plotDirectory, '\n')
   catLog('Saving R files to', Rdirectory, '\n')
@@ -360,8 +361,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
 
   #combine SNPs and CNVs into stories of subclones.
   source('getStories.R')
-  setVariantLoss(normalVariants$variants, v=v)
-  stories = try(getStories(variants=variants, cnvs=cnvs, timeSeries=timeSeries, Rdirectory=Rdirectory,
+  stories = try(getStories(variants=variants, normalVariants=normalVariants, cnvs=cnvs, timeSeries=timeSeries, Rdirectory=Rdirectory,
     plotDirectory=plotDirectory, cpus=cpus, v=v, forceRedo=forceRedoStories))
   if ( class(stories) == 'try-error' ) {
     catLog('Error in getStories!\n')

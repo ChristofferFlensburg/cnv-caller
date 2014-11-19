@@ -1,7 +1,8 @@
 
 #summarises somatic SNVs and CNV calls into subclone evolution over samples
 #and determines which subclones are subclones of which other subclones.
-getStories = function(variants, cnvs, timeSeries, Rdirectory, plotDirectory, cpus=1, v='', forceRedo=F) {
+getStories = function(variants, normalVariants, cnvs, timeSeries, Rdirectory, plotDirectory, cpus=1, v='', forceRedo=F) {
+  setVariantLoss(normalVariants$variants, v=v)
   stories = list()
   if ( length(timeSeries) == 0 ) return(stories)
   saveFile = paste0(Rdirectory, '/stories.Rdata')
