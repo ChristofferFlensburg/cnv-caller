@@ -43,7 +43,16 @@ names(lengths) = c('1','1_gl000191_random','1_gl000192_random','2','3','4','4_ct
 humanChrLengths = function() {
   humanAllChrLengths()[as.character(c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 'X', 'Y', 'M'))]
 }
+mouseChrLengths = function() {
+  lengths = c(195471971, 182113224, 160039680, 156508116, 151834684, 149736546, 145441459, 129401213, 124595110, 130694993,
+    122082543, 120129022, 120421639, 124902244, 104043685, 98207768, 94987271, 90702639, 61431566, 171031299, 91744698, 16299)
+
+  names(lengths) = c('1', '2', '3', '4', '5', '6', '7', '8', '9', '10' ,'11', '12' ,'13', '14' ,'15', '16' ,'17', '18', '19', 'X', 'Y', 'M')
+
+  return(lengths)
+}
 chrLengths = function(genome='hg19') {
   if ( genome == 'hg19' ) return(humanChrLengths())
+  else if ( genome == 'mm10' ) return(mouseChrLengths())
   else stop('chrLengths doesnt know about genome', genome, '\n')
 }

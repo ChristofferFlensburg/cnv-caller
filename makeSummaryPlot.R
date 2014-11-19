@@ -68,7 +68,7 @@ plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome,
       use = q$somaticP > 0.5
       catLog('Found', sum(use), 'somatics for', ind, '.\n')
       q = q[use,]
-      points(q$x, rep(iToY[n]-0.75, sum(use)), pch=19, cex=q$var/q$cov, col=rgb(0,0,0,pmin(1,sqrt(q$cov/100))))
+      points(q$x, rep(iToY[n]-0.75, sum(use)), pch=19, cex=1.2*sqrt(q$var/q$cov), col=rgb(0,0,0,pmin(1,sqrt(q$cov/100))))
       next
     }
     #set up information common for all indiviuals
@@ -92,15 +92,15 @@ plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome,
         mc.cores=cpus))
       significant = p < 1/pmax(20, sum(use)^0.75)
       q = qs[[col]][use,]
-      uniqueVar = var[use,-col] == 0
-      smallerVar = (rowsums(var[,-col])/rowsums(cov[,-col]))[use][significant] > (var/cov)[use,col][significant]
-      cols = ifelse(significant, ifelse(uniqueVar, 'red', ifelse(smallerVar, 'blue', 'orange')) ,rgb(0.8, 0.8, 0.8))
+      uniqueVar = rowsums(var[use,-col])[use] == 0
+      smallerVar = (rowsums(var[,-col])/rowsums(cov[,-col]))[use] > fs[use,col]
+      cols = ifelse(significant, ifelse(uniqueVar, 'red', ifelse(smallerVar, 'blue', 'orange')) ,rgb(0,0,0,pmin(1,sqrt(q$cov/100))))
     
       #colour SNPs that are different between individuals
       #red for unique, orange for increasing freq, blue for decreasing freq.
-      ord = order(significant + uniqueVar)
+      ord = order(significant + uniqueVar + smallerVar/2)
       n = which(individuals == ind)[col]
-      points(q$x[ord], rep(iToY[n]-0.75, sum(use))[ord], pch=19, cex=sqrt(q$var/q$cov)[ord], col=cols[ord])
+      points(q$x[ord], rep(iToY[n]-0.75, sum(use))[ord], pch=19, cex=1.2*sqrt(q$var/q$cov)[ord], col=cols[ord])
 
       genes[[names(cnvs)[n]]] = unique(variants$SNPs[as.character(q$x),]$inGene)
     }
@@ -139,11 +139,11 @@ plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome,
     text(xmax + (xmax-xmin)*0.12, -1, paste0('<-- somatic SNV in more than ',i,' samples.'))
   }
 
-  legend('right', c('somatic point mutation', 'new mutation', 'increasing mutation', 'decreasing mutation',
+  legend('right', c('somatic point mutation', '50% frequency', '100% frequency', 'new mutation', 'increasing mutation', 'decreasing mutation',
                     'copy number gain', 'small gain', 'copy number loss', 'small loss', 'CNN LoH', 'small CNN LoH', 'recurring mutated gene'),
-         pch=c(19, 19, 19, 19, 15, 15, 15, 15, 15, 15, 108),
-         col=c(rgb(0.8, 0.8, 0.8), 'red', 'orange', 'blue', 'blue', rgb(0.7, 0.7, 1), 'red', rgb(1, 0.7, 0.7), rgb(0, 0.7, 0), rgb(0.7, 0.91, 0.7), 'black'),
-         pt.cex=c(1,1,1,1, 2, 1, 2, 1, 2, 1, 1), bg='white')
+         pch=c(19, 19, 19, 19, 19, 19, 15, 15, 15, 15, 15, 15, 108),
+         col=c(rgb(0.8, 0.8, 0.8), rgb(0.8, 0.8, 0.8), rgb(0.8, 0.8, 0.8), 'red', 'orange', 'blue', 'blue', rgb(0.7, 0.7, 1), 'red', rgb(1, 0.7, 0.7), rgb(0, 0.7, 0), rgb(0.7, 0.91, 0.7), 'black'),
+         pt.cex=c(1,1.2*sqrt(0.5),1.2,1,1,1, 2, 1, 2, 1, 2, 1, 1), bg='white')
   
   if ( length(print) > 0 ) invisible(print[order(geneX)])
   invisible(c())

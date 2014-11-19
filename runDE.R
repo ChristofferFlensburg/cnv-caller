@@ -28,7 +28,7 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   fCsSaveFile = paste0(Rdirectory, '/fCs.Rdata')
   if ( !file.exists(fCsSaveFile) | forceRedoCount ) {
     catLog('Counting reads over capture regions.\n')
-    fCs = try(featureCounts(bamFiles, annot.ext=captureAnnotation, useMetaFeatures=F,
+    fCs = try(featureCounts(bamFiles, annot.ext=captureAnnotation, useMetaFeatures=T,
       allowMultiOverlap=T, isPairedEnd=T, minMQS=10, nthreads=cpus))
     if ( class(fCs) != 'list' ) {
       catLog('Error in featureCounts.\nInput was\nbamFiles:', bamFiles,

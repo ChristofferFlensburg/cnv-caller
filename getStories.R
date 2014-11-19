@@ -25,10 +25,12 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, Rdirectory, pl
     #set clonality of SNPs from frequency and local CNV, return stories
     catLog('SNVs..\n')
     snpStories = findSNPstories(somaticQs, cnvs[ts])
+    catLog('Keeping', nrow(snpStories), 'SNV stories.\n')
 
     #combine CNV calls over sample into stories
     catLog('Tracking clonal evolution in CNVs..\n')
     cnvStories = getCNVstories(cnvs[ts])
+    catLog('Keeping', nrow(cnvStories), 'CNV stories.\n')
 
     #cluster stories for SNPs, CNVs, both.
     catLog('merge events into clones..')
@@ -230,11 +232,18 @@ splitEvents = function(cnvs, regions) {
 
 cnvsToStories = function(cnvs, events) {
   stories = errors = data.frame()
-  for ( i in 1:nrow(events) ) {
-    call = as.character(events$call[i])
-    clonalities = extractClonalities(cnvs, events[i,])
-    stories = rbind(stories, clonalities$clonality)
-    errors = rbind(errors, clonalities$clonalityError)
+  if ( nrow(events) > 0 ) {
+    for ( i in 1:nrow(events) ) {
+      call = as.character(events$call[i])
+      clonalities = extractClonalities(cnvs, events[i,])
+      stories = rbind(stories, clonalities$clonality)
+      errors = rbind(errors, clonalities$clonalityError)
+    }
+  }
+  else {
+    events$stories=matrix(,nrow=0, ncol=length(cnvs))
+    events$errors=matrix(,nrow=0,ncol=length(cnvs))
+    return(events)
   }
   colnames(errors) = colnames(stories) = names(cnvs)
   ret = events
