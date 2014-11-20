@@ -12,11 +12,11 @@ make sure that it runs properly, and then run on your own data.
 
 2) make sure you have all the needed R-packages. (or proceed to 3 and handle the errors)
 
-3) Run the example. (this should confirm that the package works on your computer)
+3) Run the example. (this should confirm that the pipeline works on your computer)
 
 4) Skip to 6), or replace the .R files with the latest version from github if you want.
 
-5) Rerun example, switching on forceredo. (this should confirm that the latest version of the package works on your computer)
+5) Rerun example, switching on all forceredo flags. (this should confirm that the latest version of the package works on your computer)
 
 6) Set up your data in the same way as in the example.
 
