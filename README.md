@@ -3,7 +3,9 @@ cnv-caller
 
 A cnv, snv and clonality caller.
 
-Best way to run it is to download the self contained example,
+Best way to run it
+==================
+is to download the self contained example,
 make sure that it runs properly, and then run on your own data.
 
 1) download and unzip https://www.dropbox.com/s/egse96gb8n1xq4t/example.zip?dl=0
