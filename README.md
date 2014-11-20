@@ -10,7 +10,7 @@ make sure that it runs properly, and then run on your own data.
 
 1) download and unzip https://www.dropbox.com/s/egse96gb8n1xq4t/example.zip?dl=0
 
-2) make sure you have all the needed R-packages.
+2) make sure you have all the needed R-packages. (or proceed to 3 and handle the errors)
 
 3) Run the example. (this should confirm that the package works on your computer)
 
