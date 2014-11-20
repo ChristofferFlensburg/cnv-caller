@@ -1,19 +1,24 @@
 
 
-#This function outputs pdf plots to the target directory summarising somatic mutations
+#This function outputs jpg plots to the target directory summarising somatic mutations
 #and CNVs over the genome for all samples
 makeSummaryPlot = function(variants, cnvs, normals, individuals, timePoints, plotDirectory, genome='hg19', cpus=1, v='', forceRedo=F, plotName='summary') {
-  plotFile = paste0(plotDirectory, '/', plotName, '.pdf')
+  summaryDirectory = paste0(plotDirectory, '/summary/')
+  if ( !file.exists(summaryDirectory) ) dir.create(summaryDirectory)
+  plotFile = paste0(summaryDirectory, '/', plotName, '.jpg')
   if ( !file.exists(plotFile) | forceRedo ) {
     catLog('Making summary plot...')
-    pdf(plotFile, width=20, height=10)
+    jpeg(plotFile, width=20, height=10, res=300, units='in')
     plotSummary(variants, cnvs, normals, individuals, timePoints, genome, cpus)
+    dev.off()
     for ( chr in names(chrLengths(genome)) ) {
       xmin = cumsum(chrLengths(genome))[chr]-chrLengths(genome)[chr]
       xmax = cumsum(chrLengths(genome))[chr]
+      plotFile = paste0(summaryDirectory, '/', plotName, chr, '.jpg')
+      jpeg(plotFile, width=20, height=10, res=300, units='in')
       plotSummary(variants, cnvs, normals, individuals, timePoints, genome, cpus, xmin=xmin, xmax=xmax)
+      dev.off()
     }
-    dev.off()
     catLog('done.\n')
   }
   else catLog('Summary plot already in place, not redoing.\n')

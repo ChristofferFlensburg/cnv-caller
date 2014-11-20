@@ -50,7 +50,7 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   normalFCsSaveFile = paste0(normalRdirectory, '/normalFCs.Rdata')
   if ( !file.exists(normalFCsSaveFile) | forceRedoNormalCount ) {
     catLog('Counting normal reads over capture regions.\n')
-    normalFCs = try(featureCounts(externalNormalBams, annot.ext=captureAnnotation, useMetaFeatures=F,
+    normalFCs = try(featureCounts(externalNormalBams, annot.ext=captureAnnotation, useMetaFeatures=T,
       allowMultiOverlap=T, isPairedEnd=T, minMQS=10, nthreads=cpus))
     if ( class(normalFCs) != 'list' ) {
       catLog('Error in featureCounts.\nInput was\nexternalNormalBams:', externalNormalBams,

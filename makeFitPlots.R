@@ -5,18 +5,20 @@ require(WriteXLS)
 #takes a fit object for the differential coverage between samples and normals, and plots volcano plots
 #also outputs differential coverage to an excel file.
 makeFitPlots = function(fit, plotDirectory, v, forceRedoVolcanoes=F, forceRedoDifferentRegions=F) {
-  volcanoFile = paste0(plotDirectory, '/volcanoSamples.pdf')
-  if ( !file.exists(volcanoFile) | forceRedoVolcanoes ) {
-    catLog('Plotting volcanoes to ', volcanoFile, '..', sep='')
-    pdf(volcanoFile, height = 10, width = 15, compress=T)
-    for (col in colnames(fit) ) {
+  dirname = paste0(plotDirectory, '/volcanoes/')
+  if ( !file.exists(dirname) ) dir.create(dirname)
+  
+  catLog('Plotting volcanoes to ', volcanoFile, '..', sep='')
+  for (col in colnames(fit) ) {
+    volcanoFile = paste0(dirname, col, '.jpg')
+    if ( !file.exists(volcanoFile) | forceRedoVolcanoes ) {
       catLog(col, '..', sep='')
+      jpeg(volcanoFile, height = 10, width = 15, res=300, units='in')
       plotVolcano(fit, coef=col)
+      dev.off()
     }
-    dev.off()
-    catLog('done!\n', sep='')
   }
-  else catLog('Volcano plots already present in ', volcanoFile, '\n', sep='')
+  catLog('done!\n', sep='')
 
 
   differentRegionFile = paste0(plotDirectory, '/differentRegionsSamples.xls')
