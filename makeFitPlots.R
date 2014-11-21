@@ -7,8 +7,8 @@ require(WriteXLS)
 makeFitPlots = function(fit, plotDirectory, v, forceRedoVolcanoes=F, forceRedoDifferentRegions=F) {
   dirname = paste0(plotDirectory, '/volcanoes/')
   if ( !file.exists(dirname) ) dir.create(dirname)
-  
-  catLog('Plotting volcanoes to ', volcanoFile, '..', sep='')
+
+  catLog('Plotting volcanoes to ', dirname, '..', sep='')
   for (col in colnames(fit) ) {
     volcanoFile = paste0(dirname, col, '.jpg')
     if ( !file.exists(volcanoFile) | forceRedoVolcanoes ) {

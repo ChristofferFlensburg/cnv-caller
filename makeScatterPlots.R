@@ -10,16 +10,15 @@ makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, ge
     dir1 = paste0(scatterDirectory, '/', pair[1])
     if ( !file.exists(dir1) ) dir.create(dir1)
     dir2 = paste0(dir1, '/', pair[2])
-    if ( !file.exists(dir2) ) dir.create(dir2)
-
-    boring = variants$variants[[pair[1]]]$var == 0 & variants$variants[[pair[2]]]$var == 0
-    q1 = variants$variants[[pair[1]]][!boring,]
-    q2 = variants$variants[[pair[2]]][!boring,]
-    ps=qualityScatter(q1, q2, variants$SNPs, cpus=cpus, verbose=F)
-    psuf=qualityScatter(q1, q2, variants$SNPs, cpus=cpus, plotFlagged=F, verbose=F)
-    
-    outfile = paste0(dir2, '/all.jpg')
-    if ( !file.exists(outfile) | forceRedo ) {
+    if ( !file.exists(dir2) | forceRedo ) {
+      dir.create(dir2)
+      boring = variants$variants[[pair[1]]]$var == 0 & variants$variants[[pair[2]]]$var == 0
+      q1 = variants$variants[[pair[1]]][!boring,]
+      q2 = variants$variants[[pair[2]]][!boring,]
+      ps=qualityScatter(q1, q2, variants$SNPs, cpus=cpus, verbose=F)
+      psuf=qualityScatter(q1, q2, variants$SNPs, cpus=cpus, plotFlagged=F, verbose=F)
+      
+      outfile = paste0(dir2, '/all.jpg')
       catLog('Plotting to', outfile, '\n')
       jpeg(outfile, width = 10, height=10, res=300, units='in')
       qualityScatter(q1, q2, variants$SNPs, verbose=F, ps=psuf, plotFlagged=F,
@@ -27,9 +26,8 @@ makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, ge
                      xlab=paste0('variant frequency for ', pair[1], ' (', timePoints[pair[1]], ')'),
                      ylab=paste0('variant frequency for ', pair[2], ' (', timePoints[pair[2]], ')'), cpus=1)
       dev.off()
-    }
-    outfile = paste0(dir2, '/allNamed.jpg')
-    if ( !file.exists(outfile) | forceRedo ) {
+      
+      outfile = paste0(dir2, '/allNamed.jpg')
       jpeg(outfile, width = 10, height=10, res=300, units='in')
       qualityScatter(q1, q2, variants$SNPs, verbose=F, ps=psuf, plotFlagged=F,
                      main=paste0('clean variants: ', pair[1], ' vs ', pair[2]),
@@ -37,23 +35,20 @@ makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, ge
                      ylab=paste0('variant frequency for ', pair[2], ' (', timePoints[pair[2]], ')'), cpus=1,
                      print=T, printRedCut=0.25)
       dev.off()
-    }
-    outfile = paste0(dir2, '/allFlagged.jpg')
-    if ( !file.exists(outfile) | forceRedo ) {
+
+      outfile = paste0(dir2, '/allFlagged.jpg')
       jpeg(outfile, width = 10, height=10, res=300, units='in')
       qualityScatter(q1, q2, variants$SNPs, verbose=F, ps=ps,
                      main=paste0('all variants: ', pair[1], ' vs ', pair[2]),
                      xlab=paste0('variant frequency for ', pair[1], ' (', timePoints[pair[1]], ')'),
                      ylab=paste0('variant frequency for ', pair[2], ' (', timePoints[pair[2]], ')'), cpus=1)
       dev.off()
-    }
-
-    catLog('Now by chromsome. Preparing..')
-    chrs = xToChr(q1$x, genome=genome)
-    catLog('done!\n  Plotting chr:')
-    for ( chr in names(chrLengths(genome)) ) {
-      outfile = paste0(dir2, '/chr', chr, '.jpg')
-      if ( !file.exists(outfile) | forceRedo ) {
+      
+      catLog('Now by chromsome. Preparing..')
+      chrs = xToChr(q1$x, genome=genome)
+      catLog('done!\n  Plotting chr:')
+      for ( chr in names(chrLengths(genome)) ) {
+        outfile = paste0(dir2, '/chr', chr, '.jpg')
         jpeg(outfile, width = 10, height=10, res=300, units='in')
         catLog(chr, '..', sep='')
         use = chrs == chr
@@ -64,8 +59,8 @@ makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, ge
                        printRedCut=0.25, plotPosition=T, verbose=F)
         dev.off()
       }
+      catLog('done!\n')
     }
-    catLog('done!\n')
   }
 }
 
