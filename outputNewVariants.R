@@ -1,7 +1,7 @@
 
 #Compares all pairs of samples from the same individual and outputs signidicantly different frequencies between the two samples.
 #These are essentially the red points in the frequency scatter plots.
-outputNewVariants = function(variants, pairs, genome, directory, cpus=1, v, forceRedo=F) {
+outputNewVariants = function(variants, pairs, genome, directory, cpus=1, forceRedo=F) {
   outfile = paste0(directory, '/newVariants.xls')
   if ( (!file.exists(outfile) | forceRedo) & length(pairs) > 0 ) {
     news = list()

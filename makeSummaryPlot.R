@@ -2,7 +2,7 @@
 
 #This function outputs jpg plots to the target directory summarising somatic mutations
 #and CNVs over the genome for all samples
-makeSummaryPlot = function(variants, cnvs, normals, individuals, timePoints, plotDirectory, genome='hg19', cpus=1, v='', forceRedo=F, plotName='summary') {
+makeSummaryPlot = function(variants, cnvs, normals, individuals, timePoints, plotDirectory, genome='hg19', cpus=1, forceRedo=F, plotName='summary') {
   summaryDirectory = paste0(plotDirectory, '/summary/')
   if ( !file.exists(summaryDirectory) ) dir.create(summaryDirectory)
   plotFile = paste0(summaryDirectory, '/', plotName, '.jpg')
@@ -26,7 +26,7 @@ makeSummaryPlot = function(variants, cnvs, normals, individuals, timePoints, plo
 
 
 #helper function that does all the work.
-plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome, cpus, xmin=0, xmax=sum(chrLengths(genome)), v='') {
+plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome, cpus, xmin=0, xmax=sum(chrLengths(genome))) {
   N = length(cnvs)
   variants$variants = lapply(variants$variants, function(q) q[q$x > xmin & q$x < xmax,])
   cnvs = lapply(cnvs, function(cnv) {
@@ -97,8 +97,8 @@ plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome,
         mc.cores=cpus))
       significant = p < 1/pmax(20, sum(use)^0.75)
       q = qs[[col]][use,]
-      uniqueVar = rowsums(var[use,-col])[use] == 0
-      smallerVar = (rowsums(var[,-col])/rowsums(cov[,-col]))[use] > fs[use,col]
+      uniqueVar = rowsums(var[use,-col]) == 0
+      smallerVar = (rowsums(var[use,-col])/rowsums(cov[use,-col])) > fs[use,col]
       cols = ifelse(significant, ifelse(uniqueVar, 'red', ifelse(smallerVar, 'blue', 'orange')) ,rgb(0,0,0,pmin(1,sqrt(q$cov/100))))
     
       #colour SNPs that are different between individuals

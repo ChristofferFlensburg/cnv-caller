@@ -7,7 +7,7 @@ require(parallel)
 #This function take a set of bamfiles, a set of normal bamfiles, and capture regions as input.
 #The function runs differential coverage one each sample vs the pool of normals using limma-voom.
 #the counts are loess and gc corrected.
-runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory, plotDirectory, normalRdirectory, v='', cpus=1,
+runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory, plotDirectory, normalRdirectory, cpus=1,
   forceRedoFit=F, forceRedoCount=F, forceRedoNormalCount=F) {
   catLog('Starting differential coverage analysis by sample.\n')
 

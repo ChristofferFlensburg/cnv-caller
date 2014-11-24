@@ -1,6 +1,6 @@
 
 #plots the CNV calls and clonalities, and the underlying coverage and frequencies that the calls are based on.
-makeCNVplots = function(cnvs, plotDirectory, genome='hg19', v='', forceRedoCNVplots=F) {
+makeCNVplots = function(cnvs, plotDirectory, genome='hg19', forceRedoCNVplots=F) {
   CNVplotDirectory = paste0(plotDirectory, '/CNV/')
   if ( !file.exists(CNVplotDirectory) ) dir.create(CNVplotDirectory)
   for ( name in names(cnvs) ) {

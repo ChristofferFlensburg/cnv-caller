@@ -3,7 +3,7 @@
 
 #Takes variants and plots the frequencies of any two samples from the same individual against each other.
 #Goes to some effort in marking interesting SNVs.
-makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, genome='hg19', cpus=1, v='', forceRedo=F) {
+makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, genome='hg19', cpus=1, forceRedo=F) {
   scatterDirectory = paste0(plotDirectory, '/scatters')
   if ( !file.exists(scatterDirectory) ) dir.create(scatterDirectory)
   for ( pair in samplePairs ) {

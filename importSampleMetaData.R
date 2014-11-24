@@ -11,7 +11,7 @@ The meta data file should be a tab separated file with headings.\n')
 }
 
 #helper function to extract sample pairs from meta data
-metaToSamplePairs = function(names, individuals, normals, v) {
+metaToSamplePairs = function(names, individuals, normals) {
   catLog('Deciding which pairs to scatter plot..')
   pairs = list()
   for (individual in unique(individuals)) {
@@ -31,7 +31,7 @@ metaToSamplePairs = function(names, individuals, normals, v) {
 }
 
 #helper function to extract time series frmo emta data.
-metaToTimeSeries = function(names, individuals, normals, v) {
+metaToTimeSeries = function(names, individuals, normals) {
   catLog('Deciding which time series to plot..')
   series = list()
   for (individual in unique(individuals)) {

@@ -7,7 +7,7 @@ require(R.oo)
 #The function filters variants outside of the capture regions, and a few other filters.
 #The function the checks the variants in the bamfiles, and flags if the variant seems suspicious.
 #Outputs a data frame for each sample with variant and reference counts, as well as some quality information.
-getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffset, dbDir, Rdirectory, plotDirectory, filterBoring=T, cpus, v, forceRedoSNPs=F, forceRedoVariants=F) {
+getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffset, dbDir, Rdirectory, plotDirectory, filterBoring=T, cpus, forceRedoSNPs=F, forceRedoVariants=F) {
   SNPsSaveFile = paste0(Rdirectory, '/SNPs.Rdata')
   if ( file.exists(SNPsSaveFile) & !forceRedoSNPs ) {
     catLog('Loading saved SNVs.\n')
@@ -34,13 +34,6 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
     SNPs = inGene(SNPs, paddedCaptureRegions, genome=genome)
     catLog('done.\n')
     
-    if ( filterBoring ) {
-      boring = SNPs$het == 0 & SNPs$hom == 0
-      catLog('Keeping ', sum(!boring), ' out of ', length(boring),
-             ' (', round(sum(!boring)/length(!boring), 3)*100, '%) SNVs that are het or hom in at least one sample.\n', sep='')
-      SNPs = SNPs[!boring,]
-    }
-
     inCapture = SNP2GRanges(SNPs, genome=genome) %within% paddedCaptureRegions
     catLog('Keeping ', sum(inCapture), ' out of ', length(inCapture),
            ' (', round(sum(inCapture)/length(inCapture), 3)*100, '%) SNVs that are inside capture regions.\n', sep='')
@@ -68,12 +61,19 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
   else {
     catLog('Calculating variants:\n')
     gc()
-    if ( genome == 'mm10' ) SNPs$chr = paste0('chr', SNPs$chr)
     variants = lapply(bamFiles, function(file) {
-      QCsnps(pileups=importQualityScores(SNPs, file, BQoffset, cpus=cpus, v=v)[[1]], SNPs=SNPs, cpus=cpus)})
+      QCsnps(pileups=importQualityScores(SNPs, file, BQoffset, cpus=cpus)[[1]], SNPs=SNPs, cpus=cpus)})
     names(variants)=names
     variants = shareVariants(variants)
-    if ( genome == 'mm10' ) SNPs$chr = gsub('chr', '', SNPs$chr)
+    
+    if ( filterBoring ) {
+      present = rowSums(sapply(variants, function(q) q$var > q$cov*0.05)) > 0
+      catLog('Keeping ', sum(present), ' out of ', length(present),
+             ' (', round(sum(present)/length(!present), 3)*100, '%) SNVs that are present at 5% frequency in at least one sample.\n', sep='')
+      variants = lapply(variants, function(q) q[present,])
+      SNPs = SNPs[SNPs$x %in% variants[[1]]$x,]
+    }
+
     for ( i in 1:length(variants) )  variants[[i]]$db = SNPs[as.character(variants[[i]]$x),]$db
     catLog('Saving variants..')
     save(variants, file=variantsSaveFile)
@@ -211,7 +211,7 @@ matchTodbSNPs = function(SNPs, dir='~/data/dbSNP', genome='hg19') {
 
 #helper functions that counts reads in favour of reference and any present variant
 #at the given locations for the given bam files.
-importQualityScores = function(SNPs, files, BQoffset, cpus=10, v='') {
+importQualityScores = function(SNPs, files, BQoffset, cpus=10) {
   ret=list()
   chr = as.character(SNPs$chr)
   for ( file in files ) {
@@ -220,14 +220,14 @@ importQualityScores = function(SNPs, files, BQoffset, cpus=10, v='') {
       listRet = mclapply(unique(chr), function(ch) {
         use = chr == ch
         catLog(ch, '..', sep='')
-        return(getQuality(file, chr[use], SNPs$start[use], BQoffset, cpus=1, v=v))
+        return(getQuality(file, chr[use], SNPs$start[use], BQoffset, cpus=1))
       }, mc.cores=cpus)
     }
     else {
       listRet = lapply(unique(chr), function(ch) {
         use = chr == ch
         catLog(ch, '..', sep='')
-        return(getQuality(file, chr[use], SNPs$start[use], BQoffset, cpus=1, v=v))
+        return(getQuality(file, chr[use], SNPs$start[use], BQoffset, cpus=1))
       })
     }
     catLog('done!\n')
@@ -235,7 +235,7 @@ importQualityScores = function(SNPs, files, BQoffset, cpus=10, v='') {
   }
   return(ret)
 }
-getQuality = function(file, chr, pos, BQoffset, cpus=1, v='') {
+getQuality = function(file, chr, pos, BQoffset, cpus=1) {
   require(parallel)
   which = GRanges(chr, IRanges(pos-3, pos+3))
   p1 = ScanBamParam(which=which, what=c('pos', 'seq', 'cigar', 'qual', 'mapq', 'strand'))
@@ -267,6 +267,8 @@ readsToPileup = function(reads, pos, BQoffset) {
   }
   if ( any(!easy) ) {
     messyCalls = solveCigars(cigars[!easy], reads$seq[!easy], reads$qual[!easy], seqI[!easy])
+
+    #check for short softclipped calls, check if most other well-aligned reads agree, if so, keep, otherwise discard.
     if ( any(grepl('[a-z]', unlist(lapply(messyCalls, function(call) call[1])))) ) {
       softClipped = grep('[a-z]', unlist(lapply(messyCalls, function(call) call[1])))
       keepSoftClipped = rep(F, length(softClipped))
@@ -297,7 +299,7 @@ readsToPileup = function(reads, pos, BQoffset) {
         })
       }
     }
-    #check for short softclipped calls, check if most other well-aligned reads agree, if so, keep, otherwise discard.
+    
     call[!easy] = unlist(lapply(messyCalls, function(solution) solution[1]))
     qual[!easy] = unlist(lapply(messyCalls, function(solution) {
       if ( solution[2] == '' ) return(0)
@@ -305,7 +307,25 @@ readsToPileup = function(reads, pos, BQoffset) {
       })) - BQoffset
   }
 
-  ret = data.frame('call'=call, 'qual'=qual, 'mapq'=mapq, 'strand'=strand)
+  #look for stuttering in case of deletions/insertions.
+  note = rep('', length(call))
+  if ( sum(easy) > 2 ) {
+    stutterLength = 6
+    consensus = substring(reads$seq[easy], seqI[easy]-stutterLength, seqI[easy]+stutterLength)
+    consensus = consensus[nchar(consensus) == 2*stutterLength+1]
+    if ( length(consensus) > 2 ) {
+      before = names(sort(table(substring(consensus, 1, 2)),decreasing=T)[1])
+      after = names(sort(table(substring(consensus, 4, 5)),decreasing=T)[1])
+      for ( repCall in c('A', 'T', 'C', 'G') ) {
+        if ( do.call(paste0, as.list(rep(repCall, stutterLength))) %in% c(before, after) ) {
+          note[call == repCall | grepl('[+-]', call)] = 'stutter'
+        }
+      }
+    }
+  }
+
+
+  ret = data.frame('call'=call, 'qual'=qual, 'mapq'=mapq, 'strand'=strand, 'note'=note)
   if ( any(is.na(as.matrix(ret))) ) {
     catLog('NAs in pileup. Data frame was:\n')
     for ( row in 1:nrow(ret) ) catLog(as.matrix(ret[row,]), '\n')
@@ -513,6 +533,11 @@ QCsnp = function(pileup, reference, x, variant='', defaultVariant='') {
     if ( psr < 0.01 ) flag = paste0(flag, 'Sb')
   }
 
+  #compare strand ratio between variant and reference
+  if ( any(pileup$note == 'stutter') ) {
+    flag = paste0(flag, 'St')
+  }
+
   #probabilities that the base call and mapping is correct.
   bqW = 1-10^(-pileup$qual/10)
   mqW = 1-10^(-pileup$mapq/10)
@@ -545,14 +570,14 @@ QCsnp = function(pileup, reference, x, variant='', defaultVariant='') {
 }
 
 #helper function that makes sure all the variants are present in all the data frames.
-shareVariants = function(variants, v='') {
-  if ( v == 'trackProgress' ) cat('Adding uncalled variants..')      
+shareVariants = function(variants) {
+  catLog('Adding uncalled variants..')      
   common = Reduce(union, lapply(variants, rownames))
   if ( length(common) == 0 ) return()
   variants = lapply(variants, function(q) {
     new = common[!(common %in% rownames(q))]
     if ( length(new) > 0 ) {
-      if ( v == 'trackProgress' ) cat('Found ', length(new), '..', sep='')      
+      catLog('Found ', length(new), '..', sep='')      
       x = as.numeric(gsub('[AGNTCagtcn+-].*$', '', new))
       newQ = q[q$x %in% x,]
       newQ = newQ[!duplicated(newQ$x),]
@@ -567,7 +592,7 @@ shareVariants = function(variants, v='') {
     }
     return(q)
   })
-  if ( v == 'trackProgress' ) cat('done!\n')      
+  catLog('done!\n')      
   return(variants)
 }
 

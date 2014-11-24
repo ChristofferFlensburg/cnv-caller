@@ -1,8 +1,8 @@
 
 #summarises somatic SNVs and CNV calls into subclone evolution over samples
 #and determines which subclones are subclones of which other subclones.
-getStories = function(variants, normalVariants, cnvs, timeSeries, Rdirectory, plotDirectory, cpus=1, v='', forceRedo=F) {
-  setVariantLoss(normalVariants$variants, v=v)
+getStories = function(variants, normalVariants, cnvs, timeSeries, Rdirectory, plotDirectory, cpus=1, forceRedo=F) {
+  setVariantLoss(normalVariants$variants)
   stories = list()
   if ( length(timeSeries) == 0 ) return(stories)
   saveFile = paste0(Rdirectory, '/stories.Rdata')
@@ -42,12 +42,10 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, Rdirectory, pl
     allStories$errors = as.matrix(rbind(snpStories$errors, cnvStories$errors))
     rownames(allStories$stories) = rownames(allStories$errors) = rownames(allStories)
     clusteredStories = storiesToCloneStories(allStories, plotProgress=F, plot=F)
-
+    
     #combine the clustered stories into clonal evolution (figure out which is subclone of which)
     catLog('decide subclone structure..')
     cloneTree = findCloneTree(clusteredStories$cloneStories)
-
-    #plotRiver(cloneTree, clusteredStories$cloneStories, lapply(clusteredStories$storyList, function(rows) storyToLabel(allStories[rows,], variants$SNPs)))
     
     stories[[name]] = list('all'=allStories, 'clusters'=clusteredStories, 'cloneTree'=cloneTree)
     catLog('done!\n')
@@ -60,6 +58,8 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, Rdirectory, pl
 }
 
 findSNPstories = function(somaticQs, cnvs) {
+  cov10 = rowMeans(sapply(somaticQs, function(q) q$cov)) >= 10
+  somaticQs = lapply(somaticQs, function(q) q[cov10,])
   somaticQs = findSNPclonalities(somaticQs, cnvs)
   clonality = matrix(sapply(somaticQs, function(q) q$clonality), ncol=length(somaticQs))
   clonalityError = matrix(sapply(somaticQs, function(q) q$clonalityError), ncol=length(somaticQs))
@@ -69,9 +69,9 @@ findSNPstories = function(somaticQs, cnvs) {
 
   allSmall = rowSums(abs(ret$stories) < ret$errors*2 | is.na(ret$errors) |ret$stories < 0.3) == ncol(ret$stories)
   ret = ret[!allSmall,]
-  uncertain = rowMeans(ret$errors) > 0.3
+  uncertain = rowMeans(ret$errors) > 0.25
   ret = ret[!uncertain,]
-  catLog('Filtered ', sum(allSmall) , ' all small and ', sum(uncertain), ' uncertain stories.\n', sep='')
+  catLog('Filtered ', sum(allSmall) , ' small and ', sum(uncertain), ' uncertain stories.\n', sep='')
 
   return(ret)
 }
@@ -127,10 +127,12 @@ findSNPclonalities = function(somaticQs, cnvs) {
     #propagate to clonality
     clonalityHigh = ifelse(homeAllele == 'A', 2/(2+nA/(f+fErr)-nA-nB),
       ifelse(homeAllele == 'B', 2/(2+nB/(f+fErr)-nA-nB), 1 - (1 - (f+fErr)*2)/((f+fErr)*(nA+nB-2)+1)))
-    clonalityLow = ifelse(homeAllele == 'A', 2/(2+nA/(f-fErr)-nA-nB),
-      ifelse(homeAllele == 'B', 2/(2+nB/(f-fErr)-nA-nB), 1 - (1 - (f-fErr)*2)/((f-fErr)*(nA+nB-2)+1)))
+    #Not allowing the lower limit to go into negatives reduces the error estimate of low frequnecies
+    #and is associated with a prior bias towards clonality 0 for low frequencies.
+    clonalityLow = pmax(0, ifelse(homeAllele == 'A', 2/(2+nA/(f-fErr)-nA-nB),
+      ifelse(homeAllele == 'B', 2/(2+nB/(f-fErr)-nA-nB), 1 - (1 - (f-fErr)*2)/((f-fErr)*(nA+nB-2)+1))))
     clonalityError = (clonalityHigh - clonalityLow)/2
-    clonalityError[f==0] = fErr[f==0]
+    #clonalityError[f==0] = fErr[f==0]
 
     q$homeAllele = homeAllele
     q$clonality = clonality
@@ -336,6 +338,9 @@ freqToDirectionProb = function(freq, freqX, f, clonality) {
 #and a list of dataframes for the individual stories in each subclone.
 storiesToCloneStories = function(stories, minDistance=2, plotProgress=F, plot=F) {
   storyList = as.list(rownames(stories))
+  if ( length(storyList) < 2 ) 
+    return(list('cloneStories'=stories, 'storyList'=storyList))
+
   
   distance = do.call(rbind, lapply(1:length(storyList), function(is) sapply(1:length(storyList), function(js) pairScore(stories, is, js))))
   distance = distance + minDistance*as.numeric(row(distance) == col(distance))
@@ -376,34 +381,36 @@ storiesToCloneStories = function(stories, minDistance=2, plotProgress=F, plot=F)
 
 #The metric on stories, used for clustering similar stories into subclones.
 pairScore = function(stories, is, js) {
-  if ( length(is) == 1 ) rms1 = 0.5
+  if ( length(is) == 1 ) wms1 = 0.5
   else {
     err1 = stories$errors[is,]
     st1 = stories$stories[is,]
     w1 = t(1/t(err1^2)/colsums(1/err1^2))
     mean1 = colSums(st1*w1)
     sigma1 = abs(t(t(st1)-mean1))/err1
-    rms1 = sqrt(mean(sigma1^2))
+    wms1 = sum(sigma1*w1)/sum(w1)
   }
-  if ( length(js) == 1 ) rms2 = 0.5
+  if ( length(js) == 1 ) wms2 = 0.5
   else {
     err2 = stories$errors[js,]
     st2 = stories$stories[js,]
     w2 = t(1/t(err2^2)/colsums(1/err2^2))
     mean2 = colSums(st2*w2)
     sigma2 = abs(t(t(st2)-mean2))/err2
-    rms2 = sqrt(mean(sigma2^2))
+    wms2 = sum(sigma2*w2)/sum(w2)
   }
-  unpairedRms = sqrt(rms1^2+rms2^2)
+  W1 = sum(1/stories$errors[is,]^2)
+  W2 = sum(1/stories$errors[js,]^2)
+  unpairedWms = (wms1*W1+wms2*W2)/(W1+W2)
 
   err = stories$errors[c(is,js),]
   st = stories$stories[c(is,js),]
   w = t(1/t(err^2)/colsums(1/err^2))
   mean = colSums(st*w)
   sigma = abs(t(t(st)-mean))/err
-  rms = sqrt(mean(sigma^2))
+  wms = sum(sigma*w)/sum(w)
 
-  return(rms + noneg(rms - unpairedRms) )
+  return(wms + noneg(wms - unpairedWms) )
 }
 
 #defines a metric between two stories
@@ -424,17 +431,16 @@ findCloneTree = function(cloneStories) {
   #add the purity as a story (this may or may not already be present)
   purity = sapply(1:ncol(cloneStories$stories), function(i) max(cloneStories$stories[,i]))
   #check which clones are subclones of which others, allowing an error bar from each clone.
-  subcloneMx = apply(abs(cloneStories$stories) + cloneStories$errors, 1,
+  subcloneMx = as.matrix(apply(abs(cloneStories$stories) + cloneStories$errors, 1,
     function(story1) apply(abs(cloneStories$stories) - cloneStories$errors, 1,
-                           function(story2) all(story1 > story2)))
-  greaterSum = apply(abs(cloneStories$stories), 1,
+                           function(story2) all(story1 > story2))))
+  greaterSum = as.matrix(apply(abs(cloneStories$stories), 1,
     function(story1) apply(abs(cloneStories$stories), 1,
-                           function(story2) sum(story1) > sum(story2)))
+                           function(story2) sum(story1) > sum(story2))))
   subcloneMx = subcloneMx & greaterSum
-
   subcloneStories = cloneStories$stories
   rownames(subcloneMx) = colnames(subcloneMx) = rownames(subcloneStories) = rownames(cloneStories)
-
+  
   cloneTree = list('all'=findChildren(subcloneMx, subcloneStories))
 
   return(cloneTree)

@@ -3,21 +3,29 @@
 #flags variants with suspicious behaviour in the normals.
 #marks the somatic-looking variants in the samples
 #ie non-db variants that are not present in the normals and not flagged as suspicious.
-matchFlagVariants = function(variants, normalVariants, individuals, normals, Rdirectory, v=v, forceRedoMatchFlag=F) {
+matchFlagVariants = function(variants, normalVariants, individuals, normals, Rdirectory, forceRedoMatchFlag=F) {
   saveFile = paste0(Rdirectory, '/allVariants.Rdata')
   if ( file.exists(saveFile) & !forceRedoMatchFlag ) {
     catLog('Loading final version of combined variants.\n')
     load(file=saveFile)
     return(allVariants)
   }
-  variants = matchVariants(variants, normalVariants, v=v)
-  normalVariants = matchVariants(normalVariants, variants, v=v)
+  variants = matchVariants(variants, normalVariants)
+  normalVariants = matchVariants(normalVariants, variants)
+
+  #remove boring variants
+  present = rowSums(sapply(variants$variants, function(q) q$var > q$cov*0.05)) > 0
+  catLog('Keeping ', sum(present), ' out of ', length(present),
+         ' (', round(sum(present)/length(!present), 3)*100, '%) SNVs that are present at 5% frequency in at least one sample.\n', sep='')
+  variants$variants = lapply(variants$variants, function(q) q[present,])
+  normalVariants$variants = lapply(normalVariants$variants, function(q) q[present,])
+  variants$SNPs = normalVariants$SNPs = variants$SNPs[variants$SNPs$x %in% variants$variants[[1]]$x,]
 
   #Use the normals to flag variants that are noisy in the normals
-  variants = flagFromNormals(variants, normalVariants, cpus=cpus, v=v)
+  variants = flagFromNormals(variants, normalVariants, cpus=cpus)
 
   #mark somatic variants
-  variants = markSomatics(variants, normalVariants, individuals, normals, cpus=cpus, v=v)
+  variants = markSomatics(variants, normalVariants, individuals, normals, cpus=cpus)
   
   allVariants = list('variants'=variants, 'normalVariants'=normalVariants)
   catLog('Saving final version of combined variants..')
@@ -29,7 +37,7 @@ matchFlagVariants = function(variants, normalVariants, individuals, normals, Rdi
 
 
 #helper function that ensures that the first variants object have all the variants.
-matchVariants = function(vs1, vs2, v='') {
+matchVariants = function(vs1, vs2) {
   catLog('Matching variants..')      
   vs1Vars = rownames(vs1$variants[[1]])
   vs2Vars = rownames(vs2$variants[[1]])
@@ -66,9 +74,9 @@ matchVariants = function(vs1, vs2, v='') {
 }
 
 #helper function that flags variants that have suspicious behaviour in the pool of normals.
-flagFromNormals = function(variants, normalVariants, cpus=1, v='') {  
+flagFromNormals = function(variants, normalVariants, cpus=1) {  
   #check normals for recurring noise.
-  setVariantLoss(normalVariants$variants, v=v)
+  setVariantLoss(normalVariants$variants)
   varN = do.call(cbind, lapply(normalVariants$variants, function(q) q$var))
   covN = do.call(cbind, lapply(normalVariants$variants, function(q) q$cov))
   db = normalVariants$variants[[1]]$db
@@ -118,7 +126,7 @@ flagFromNormals = function(variants, normalVariants, cpus=1, v='') {
 
 #This helper function assign probabilities that variants are somatics.
 # the probabilities that the variants are true somatic variants are added in a column 'somaticP'
-markSomatics = function(variants, normalVariants, individuals, normals, cpus=cpus, v=v) {
+markSomatics = function(variants, normalVariants, individuals, normals, cpus=cpus) {
   names = names(variants$variants)
   #pair up cancer normals
   correspondingNormal = findCorrespondingNormal(names, individuals, normals)
@@ -250,10 +258,10 @@ fisherTest = function(p) {
   return(c(Xsq = Xsq, pVal = pVal))
 }
 
-setVariantLoss = function(variants, maxLoops = 99, v='') {
+setVariantLoss = function(variants, maxLoops = 99) {
   #if called with several samples, take average
   if ( class(variants) == 'list' ) {
-    vL = mean(unlist(lapply(variants, function(var) setVariantLoss(var, maxLoops=maxLoops, v=''))))
+    vL = mean(unlist(lapply(variants, function(var) setVariantLoss(var, maxLoops=maxLoops))))
     assign('.variantLoss', vL, envir = .GlobalEnv)
     catLog('Average variant loss is', vL, '\n')
     return(.variantLoss)

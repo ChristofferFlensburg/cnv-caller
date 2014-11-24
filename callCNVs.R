@@ -7,7 +7,7 @@
 #It then calls the CN of each clustered region, as well as clonality, uncertainty estimate and p-value
 #for normal CN.
 #returns a list of data frames with each region of the genome on a row.
-callCNVs = function(variants, normalVariants, fitS, names, individuals, normals, Rdirectory, genome='hg19', cpus=1, v='', forceRedoCNV=F) {
+callCNVs = function(variants, normalVariants, fitS, names, individuals, normals, Rdirectory, genome='hg19', cpus=1, forceRedoCNV=F) {
   clustersSaveFile = paste0(Rdirectory, '/clusters.Rdata')
   if ( file.exists(clustersSaveFile) & !forceRedoCNV ) {
     catLog('Loading saved CNV results.\n')
@@ -26,13 +26,13 @@ callCNVs = function(variants, normalVariants, fitS, names, individuals, normals,
                                   normalVariants=variants$variants[[correspondingNormal[name]]],
                                   moreNormalVariants=normalVariants$variants,
                                   fit = subsetFit(fitS, cols=paste0(name, '-normal')),
-                                  genome=genome, v=v, cpus=cpus))
+                                  genome=genome, cpus=cpus))
     else
       return(callCancerNormalCNVs(cancerVariants=variants$variants[[name]],
                             normalVariants=FALSE,
                             moreNormalVariants=normalVariants$variants,
                             fit = subsetFit(fitS, cols=paste0(name, '-normal')),
-                                  genome=genome, v=v, cpus=cpus))
+                                  genome=genome, cpus=cpus))
   })
 
   names(clusters) = names
@@ -42,31 +42,59 @@ callCNVs = function(variants, normalVariants, fitS, names, individuals, normals,
 
 
 #the high level function that controls the steps of the CNV calling for given sample and normal variant objects.
-callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVariants, fit, genome='hg19', v='', cpus=1) {
+callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVariants, fit, genome='hg19', cpus=1) {
   require(parallel)
   #estimate reference bias and variance from the selected normal hets.
-  if ( class(normalVariants) == 'logical') setVariantLoss(moreNormalVariants, v=v)
-  else setVariantLoss(normalVariants, v=v)
+  if ( class(normalVariants) == 'logical') {
+    a=try(setVariantLoss(moreNormalVariants))
+    if ( class(a) == 'try-error' ) {
+      catLog('Error in setVariantLoss(moreNormalVariants)\n')
+      stop('Error in setVariantLoss(moreNormalVariants)!')
+    }
+  }
+  else {
+    a=try(setVariantLoss(normalVariants))
+    if ( class(a) == 'try-error' ) {
+      catLog('Error in setVariantLoss(normalVariants)\n')
+      stop('Error in setVariantLoss(normalVariants)!')
+    }
+  }
 
   #select good germline het variants from normals:
-  if ( class(normalVariants) == 'logical') use = selectGermlineHetsFromCancer(cancerVariants, moreNormalVariants, v=v, cpus=cpus)
-  else use = selectGermlineHets(normalVariants, moreNormalVariants, v=v, cpus=cpus)
+  if ( class(normalVariants) == 'logical') {
+    use = try(selectGermlineHetsFromCancer(cancerVariants, moreNormalVariants, cpus=cpus))
+    if ( class(use) == 'try-error' ) {
+      catLog('Error in selectGermlineHetsFromCancer(cancerVariants, moreNormalVariants, cpus=cpus)\n')
+      stop('Error in selectGermlineHetsFromCancer(cancerVariants, moreNormalVariants, cpus=cpus)!')
+    }
+  }
+  else {
+    use = try(selectGermlineHets(normalVariants, moreNormalVariants, cpus=cpus))
+    if ( class(use) == 'try-error' ) {
+      catLog('Error in selectGermlineHets(normalVariants, moreNormalVariants, cpus=cpus)\n')
+      stop('Error in selectGermlineHets(normalVariants, moreNormalVariants, cpus=cpus)!')
+    }
+  }
   is = rownames(cancerVariants) %in% use
   cancerVariants = cancerVariants[is,]
   
   #summarise by capture region
   catLog('Summarising capture regions..')
-  cancerCR = unifyCaptureRegions(cancerVariants, fit, cpus=cpus)
+  cancerCR = try(unifyCaptureRegions(cancerVariants, fit, cpus=cpus))
+  if ( class(cancerCR) == 'try-error' ) {
+    catLog('Error in unifyCaptureRegions(cancerVariants, fit, cpus=cpus)\n')
+    stop('Error in unifyCaptureRegions(cancerVariants, fit, cpus=cpus)!')
+  }
   catLog('done!\n')
 
   #run clustering algorithm
-  cancerCluster = mergeChromosomes(cancerCR, genome=genome, v=v, cpus=cpus)
+  cancerCluster = mergeChromosomes(cancerCR, genome=genome, cpus=cpus)
 
   #run post processing, such as correcting normalisation from AB regions, calling CNVs and clonalities.
   catLog('Postprocessing...')
   cancerFreqs = data.frame(var=mirrorDown(cancerVariants$var, cov=cancerVariants$cov),
     cov=cancerVariants$cov, x=cancerVariants$x)
-  post = postProcess(cancerCluster, cancerCR, cancerFreqs, genome, v=v)
+  post = postProcess(cancerCluster, cancerCR, cancerFreqs, genome)
   cancerCluster = post$clusters
   cancerCR$M = cancerCR$M - post$meanM
   #plotCR(cancerCluster)
@@ -79,7 +107,7 @@ callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVarian
 
 
 #helper function that selects germline het SNPs in the presence of a normal sample from the same individual.
-selectGermlineHets = function(normalVariants, moreNormalVariants, minCoverage = 10, v='', cpus=1) {
+selectGermlineHets = function(normalVariants, moreNormalVariants, minCoverage = 10, cpus=1) {
   #only bother with variants that have enough coverage so that we can actually see a change in frequency
   if ( v == 'trackProgress' ) cat('Taking variants with minimum coverage of', minCoverage, '...')
   decentCoverage = normalVariants$cov >= minCoverage
@@ -149,7 +177,7 @@ selectGermlineHets = function(normalVariants, moreNormalVariants, minCoverage = 
 }
 
 #helper function that selects germline het SNPs in the absence of a normal sample from the same individual.
-selectGermlineHetsFromCancer = function(cancerVariants, moreNormalVariants, minCoverage = 10, v='', cpus=1) {
+selectGermlineHetsFromCancer = function(cancerVariants, moreNormalVariants, minCoverage = 10, cpus=1) {
   #only bother with variants that have enough coverage so that we can actually see a change in frequency
   catLog('Taking variants with minimum coverage of', minCoverage, '...')
   decentCoverage = cancerVariants$cov >= minCoverage
@@ -246,7 +274,7 @@ unifyCaptureRegions = function(variants, fit, cpus=1) {
 
 
 #merges regions in each chromosome.
-mergeChromosomes = function(cR, genome='hg19', v='', cpus=1, ...) {
+mergeChromosomes = function(cR, genome='hg19', cpus=1, ...) {
   chrs = xToChr(cR$x1, genome=genome)
   #clusters = list()
   catLog('Merging capture regions with same coverage and MAF: ')
@@ -312,13 +340,13 @@ mergeRegions = function(cR, minScore = 0.05, plot=F, debug=F) {
 }
 
 #takes clustered regions and post processes them by calling copy numbers and clonality.
-postProcess = function(clusters, cRs, freqs, genome='hg19', v='') {
+postProcess = function(clusters, cRs, freqs, genome='hg19') {
   clusters$f = refUnbias(clusters$var/clusters$cov)
   clusters = redoHetCalculations(clusters, freqs)
   renorm =  normaliseCoverageToHets(clusters)
   clusters = renorm$clusters
-  clusters = addCall(clusters, freqs, v=v)
-  clusters = findSubclones(clusters, v=v)
+  clusters = addCall(clusters, freqs)
+  clusters = findSubclones(clusters)
   rownames(clusters) = make.names(paste0('chr', xToChr(clusters$x1, genome=genome)), unique=T)
   clusters = clusters[order(clusters$x1),]
   return(list(clusters=clusters, meanM=renorm$meanM))
@@ -363,7 +391,7 @@ normaliseCoverageToHets = function(clusters) {
 }
 
 #calls the allelic copy number and clonality of the region.
-addCall = function(clusters, freqs, v='') {
+addCall = function(clusters, freqs) {
   catLog('Calling CNVs in clustered regions..')
   for ( row in 1:nrow(clusters) ) {
     clusters$call[row] = '???'
@@ -501,7 +529,7 @@ isCNV = function(cluster, freqs, M, f, prior, sigmaCut=3) {
 }
 
 #groups up CNV regions with similar clonalities to estimate the subclonal structure of the sample
-findSubclones = function(cR, v='') {
+findSubclones = function(cR) {
   catLog('Finding subclones..')  
   clones = order(-cR$clonality)
   clones = clones[cR$clonality[clones] < 1]

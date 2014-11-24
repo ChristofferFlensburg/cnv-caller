@@ -4,7 +4,7 @@ require(fields)
 
 #prints heatmaps and line plots of the frequency of the SNVs in the samples of the same individual
 #also outputs the results to excel files.
-makeSNPprogressionPlots = function(variants, timeSeries, plotDirectory, cpus=1, v='', forceRedo=F) {
+makeSNPprogressionPlots = function(variants, timeSeries, plotDirectory, cpus=1, forceRedo=F) {
   msDirectory = paste0(plotDirectory, '/multiSample')
   if ( length(timeSeries) == 0 ) return()
   if ( !file.exists(msDirectory) ) dir.create(msDirectory)
@@ -16,8 +16,8 @@ makeSNPprogressionPlots = function(variants, timeSeries, plotDirectory, cpus=1, 
     if ( !file.exists(outfile) | forceRedo ) {
       catLog('Plotting SNP progression to ', outfile, '..', sep='')
       pdf(outfile, width = 15, height=10, compress=T)
-      qualityProgression(variants$variants[ts], variants$SNPs, nondb=F, excelFile=excelFileDB, main='dbSNPs only', v=v)
-      qualityProgression(variants$variants[ts], variants$SNPs, db=F, excelFile=excelFileNotDB, main='non-dbSNPs only', v=v)
+      qualityProgression(variants$variants[ts], variants$SNPs, nondb=F, excelFile=excelFileDB, main='dbSNPs only')
+      qualityProgression(variants$variants[ts], variants$SNPs, db=F, excelFile=excelFileNotDB, main='non-dbSNPs only')
       dev.off()
       catLog('done.\n')
     }
@@ -26,7 +26,7 @@ makeSNPprogressionPlots = function(variants, timeSeries, plotDirectory, cpus=1, 
 
 
 #helper function that does all the work for the frequency progression plots.
-qualityProgression = function(qs, SNPs, db=T, nondb=T, excelFile='', main='', v='') {
+qualityProgression = function(qs, SNPs, db=T, nondb=T, excelFile='', main='') {
   catLog('Finding common variants..')
   if ( !nondb ) qs = lapply(qs, function(q) q[q$db,])
   if ( !db ) qs = lapply(qs, function(q) q[!q$db,])
