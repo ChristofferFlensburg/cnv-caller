@@ -9,6 +9,7 @@
 # described below.
 #
 ###############################################################################
+source('analyse.R')
 
 ##############################
 #                            #
@@ -71,26 +72,6 @@ inputFiles = list('metaDataFile'=metaDataFile, 'vcfFiles'=vcfFiles, 'normalDirec
 outputDirectories = list('Rdirectory'=Rdirectory, 'plotDirectory'=plotDirectory)
 runtimeSettings = list('cpus'=cpus, 'outputToTerminalAsWell'=T)
 settings = list('genome'=genome, 'BQoffset'=BQoffset)
-forceRedo = list(
-  'forceRedoCount'=F,
-  'forceRedoNormalCount'=F,
-  'forceRedoFit'=F,
-  'forceRedoVolcanoes'=F,
-  'forceRedoDifferentRegions'=F,
-  'forceRedoSNPs'=F,
-  'forceRedoVariants'=F,
-  'forceRedoNormalSNPs'=F,
-  'forceRedoNormalVariants'=F,
-  'forceRedoMatchFlag'=F,
-  'forceRedoScatters'=F,
-  'forceRedoOutputSomatic'=F,
-  'forceRedoNewVariants'=F,
-  'forceRedoSNPprogression'=F,
-  'forceRedoCNV'=F,
-  'forceRedoCNVplots'=F,
-  'forceRedoSummary'=F,
-  'forceRedoStories'=F,
-  'forceRedoRiver'=F)
+forceRedo = forceRedoNothing()
 
-source('analyse.R')
 analyse(inputFiles, outputDirectories, settings, forceRedo, runtimeSettings)

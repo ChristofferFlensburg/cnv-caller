@@ -33,6 +33,10 @@ makeCNVplots = function(cnvs, plotDirectory, genome='hg19', forceRedoCNVplots=F)
         plotCR(cnvs[[name]]$clusters, errorBars=T, genome=genome, add=T)
       dev.off()
     }
+    outerFilename = paste0(CNVplotDirectory, '/', name, '.jpg')
+    if ( !file.exists(outerFilename) | forceRedoCNVplots ) {
+      system(paste0('cp ', gsub(' ', '\\\\ ',filename), ' ', gsub(' ', '\\\\ ',outerFilename)), intern=T)
+    }
 
     for( chr in names(chrLengths(genome)) ) {
       filename = paste0(dirname, '/chr', chr, '.jpg')

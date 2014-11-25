@@ -7,7 +7,7 @@ require(R.oo)
 #The function filters variants outside of the capture regions, and a few other filters.
 #The function the checks the variants in the bamfiles, and flags if the variant seems suspicious.
 #Outputs a data frame for each sample with variant and reference counts, as well as some quality information.
-getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffset, dbDir, Rdirectory, plotDirectory, filterBoring=T, cpus, forceRedoSNPs=F, forceRedoVariants=F) {
+getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffset, dbDir, Rdirectory, plotDirectory, cpus, forceRedoSNPs=F, forceRedoVariants=F) {
   SNPsSaveFile = paste0(Rdirectory, '/SNPs.Rdata')
   if ( file.exists(SNPsSaveFile) & !forceRedoSNPs ) {
     catLog('Loading saved SNVs.\n')
@@ -66,13 +66,11 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
     names(variants)=names
     variants = shareVariants(variants)
     
-    if ( filterBoring ) {
-      present = rowSums(sapply(variants, function(q) q$var > q$cov*0.05)) > 0
-      catLog('Keeping ', sum(present), ' out of ', length(present),
-             ' (', round(sum(present)/length(!present), 3)*100, '%) SNVs that are present at 5% frequency in at least one sample.\n', sep='')
-      variants = lapply(variants, function(q) q[present,])
-      SNPs = SNPs[SNPs$x %in% variants[[1]]$x,]
-    }
+    present = rowSums(sapply(variants, function(q) q$var > q$cov*0.05)) > 0
+    catLog('Keeping ', sum(present), ' out of ', length(present),
+           ' (', round(sum(present)/length(!present), 3)*100, '%) SNVs that are present at 5% frequency in at least one sample.\n', sep='')
+    variants = lapply(variants, function(q) q[present,])
+    SNPs = SNPs[SNPs$x %in% variants[[1]]$x,]
 
     for ( i in 1:length(variants) )  variants[[i]]$db = SNPs[as.character(variants[[i]]$x),]$db
     catLog('Saving variants..')
@@ -604,4 +602,56 @@ inGene = function(SNPs, genes, noHit = NA, genome='hg19') {
   inGene[queryHits(hits)] = names(genes)[subjectHits(hits)]
   SNPs$inGene = inGene
   return(SNPs)
+}
+
+
+
+
+
+
+
+#Takes the sample variants and normal bam files and capture regions.
+#return the variant information for the normals on the positions that the samples are called on.
+getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, BQoffset, dbDir, Rdirectory, plotDirectory, cpus, forceRedoSNPs=F, forceRedoVariants=F) {
+  SNPs = variants$SNPs
+
+  variantsSaveFile = paste0(Rdirectory, '/normalVariants.Rdata')
+  if ( file.exists(variantsSaveFile) & !forceRedoVariants ) {
+    catLog('Loading saved variants..')
+    load(file=variantsSaveFile)
+    catLog('done.\n')
+  }
+  else {
+    catLog('Calculating variants:\n')
+    gc()
+    variants = lapply(bamFiles, function(file) {
+      QCsnps(pileups=importQualityScores(SNPs, file, BQoffset, cpus=cpus)[[1]], SNPs=SNPs, cpus=cpus)})
+    names(variants)=names
+    variants = shareVariants(variants)
+    
+    for ( i in 1:length(variants) )  variants[[i]]$db = SNPs[as.character(variants[[i]]$x),]$db
+    catLog('Saving variants..')
+    save(variants, file=variantsSaveFile)
+    catLog('done.\n')
+
+    diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
+    if ( !file.exists(diagnosticPlotsDirectory) ) dir.create(diagnosticPlotsDirectory)
+    FreqDirectory = paste0(diagnosticPlotsDirectory, '/frequencyDistribution/')
+    catLog('Plotting frequency distributions to ', FreqDirectory,'..', sep='')
+    if ( !file.exists(FreqDirectory) ) dir.create(FreqDirectory)
+    for ( sample in names(variants) ) {
+      catLog(sample, '..', sep='')
+      png(paste0(FreqDirectory, sample, '-scatter.png'), height=2000, width=4000, res=144)
+      use = variants[[sample]]$cov > 0
+      plotColourScatter((variants[[sample]]$var/variants[[sample]]$cov)[use], variants[[sample]]$cov[use],
+                        log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
+      dev.off()
+      png(paste0(FreqDirectory, sample, '-hist.png'), height=2000, width=4000, res=144)
+      hist(variants[[sample]]$var/variants[[sample]]$cov, breaks=(0:100)/100, col=mcri('blue'))
+      dev.off()
+    }
+    catLog('done.\n')  
+  }
+  
+  return(list(SNPs=SNPs, variants=variants))
 }

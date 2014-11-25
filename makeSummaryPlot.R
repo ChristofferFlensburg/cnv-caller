@@ -7,11 +7,12 @@ makeSummaryPlot = function(variants, cnvs, normals, individuals, timePoints, plo
   if ( !file.exists(summaryDirectory) ) dir.create(summaryDirectory)
   plotFile = paste0(summaryDirectory, '/', plotName, '.jpg')
   if ( !file.exists(plotFile) | forceRedo ) {
-    catLog('Making summary plot...')
+    catLog('Making summary plot..')
     jpeg(plotFile, width=20, height=10, res=300, units='in')
     plotSummary(variants, cnvs, normals, individuals, timePoints, genome, cpus)
     dev.off()
     for ( chr in names(chrLengths(genome)) ) {
+      catLog(chr, '..', sep='')
       xmin = cumsum(chrLengths(genome))[chr]-chrLengths(genome)[chr]
       xmax = cumsum(chrLengths(genome))[chr]
       plotFile = paste0(summaryDirectory, '/', plotName, chr, '.jpg')
@@ -71,7 +72,6 @@ plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome,
       n = which(individuals == ind)[1]
       q = variants$variants[[n]]
       use = q$somaticP > 0.5
-      catLog('Found', sum(use), 'somatics for', ind, '.\n')
       q = q[use,]
       points(q$x, rep(iToY[n]-0.75, sum(use)), pch=19, cex=1.2*sqrt(q$var/q$cov), col=rgb(0,0,0,pmin(1,sqrt(q$cov/100))))
       next
@@ -121,7 +121,6 @@ plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome,
     i = i+1
     print = allGenes[geneCounts > i]
   }
-  catLog('Printing genes somatic in more than', i, 'samples.\n')
   if ( length(print) > 0 ) {
     differentIndividuals = sapply(print, function(gene) length(unique(individuals[unlist(lapply(genes, function(gs) gene %in% gs))]))) > 1
     for ( name in names(cnvs) ) {

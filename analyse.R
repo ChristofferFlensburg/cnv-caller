@@ -1,37 +1,105 @@
 
-#call dependencies
-#source('Rscripts/functions.R')
-#source('Rscripts/analysisFunctions.R')
-
-#required packages
-require(limma)
-require(edgeR)
-require(Rsubread)
-require(parallel)
-
 analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSettings) {
   source('debug.R')
 
-  if ( !all(c('metaDataFile', 'vcfFiles', 'normalDirectory', 'captureRegionsFile', 'dbSNPdirectory') %in% names(inputFiles)) )
-    stop('inputFiles need all entries: metaDataFile, vcfFiles, normalDirectory, captureRegionsFile, dbSNPdirectory.')
   if ( !all(c('Rdirectory', 'plotDirectory') %in% names(outputDirectories)) )
     stop('outputDirectories need all entries: Rdirectory, plotDirectory.')
+  Rdirectory = outputDirectories$Rdirectory
+  if ( !exists('Rdirectory') ) stop('Need to set Rdirectory.')
+  if ( class(Rdirectory) != 'character' ) stop('Rdirectory needs to be of class character.')
+  
+  if ( !file.exists(Rdirectory) ) {
+    dirSuccess = dir.create(Rdirectory)
+    if ( !dirSuccess ) stop('Failed to create the Rdirectory ', Rdirectory,
+                            '. Note that parent directory must exist.')
+  }
+
+  #set up logfile and log start of run.
+  outputToTerminalAsWell = runtimeSettings$outputToTerminalAsWell
+  if ( is.null(outputToTerminalAsWell) | class(outputToTerminalAsWell) != 'logical' ) outputToTerminalAsWell=F
+  logFile = paste0(Rdirectory, '/runtimeTracking.log')
+  assign('catLog', function(...) cat(..., file=logFile, append=T), envir = .GlobalEnv)
+  if ( outputToTerminalAsWell )
+    assign('catLog', function(...) {cat(..., file=logFile, append=T); cat(...)}, envir = .GlobalEnv)
+
+  catLog('\n\n\n', as.character(Sys.time()),
+         '\n######################################################################\n')
+
+
+  libraryLoaded = library(limma, logical.return=T)
+  if ( !libraryLoaded ) {
+    catLog('Error: Failed to load limma.\n')
+    stop('Failed to load limma.')
+  }
+  libraryLoaded = library(edgeR, logical.return=T)
+  if ( !libraryLoaded ) {
+    catLog('Error: Failed to load edgeR.\n')
+    stop('Failed to load edgeR.')
+  }
+  libraryLoaded = library(Rsubread, logical.return=T)
+  if ( !libraryLoaded ) {
+    catLog('Error: Failed to load Rsubread.\n')
+    stop('Failed to load Rsubread.')
+  }
+  libraryLoaded = library(parallel, logical.return=T)
+  if ( !libraryLoaded ) {
+    catLog('Error: Failed to load parallel.\n')
+    stop('Failed to load parallel.')
+  }
+  libraryLoaded = library(Rsamtools, logical.return=T)
+  if ( !libraryLoaded ) {
+    catLog('Error: Failed to load Rsamtools.\n')
+    stop('Failed to load Rsamtools.')
+  }
+  libraryLoaded = library(GenomicRanges, logical.return=T)
+  if ( !libraryLoaded ) {
+    catLog('Error: Failed to load GenomicRanges.\n')
+    stop('Failed to load GenomicRanges.')
+  }
+  libraryLoaded = library(R.oo, logical.return=T)
+  if ( !libraryLoaded ) {
+    catLog('Error: Failed to load R.oo.\n')
+    stop('Failed to load R.oo.')
+  }
+  libraryLoaded = library(rtracklayer, logical.return=T)
+  if ( !libraryLoaded ) {
+    catLog('Error: Failed to load rtracklayer.\n')
+    stop('Failed to load rtracklayer.')
+  }
+  libraryLoaded = library(WriteXLS, logical.return=T)
+  if ( !libraryLoaded ) {
+    catLog('Error: Failed to load WriteXLS.\n')
+    stop('Failed to load WriteXLS.')
+  }
+  libraryLoaded = library(fields, logical.return=T)
+  if ( !libraryLoaded ) {
+    catLog('Error: Failed to load fields.\n')
+    stop('Failed to load fields.')
+  }
+  catLog('All libraries loaded successfully.\n')
+
+  if ( !all(c('metaDataFile', 'vcfFiles', 'normalDirectory', 'captureRegionsFile', 'dbSNPdirectory') %in% names(inputFiles)) )
+    stop('inputFiles need all entries: metaDataFile, vcfFiles, normalDirectory, captureRegionsFile, dbSNPdirectory.')
   if ( !all(c('BQoffset', 'genome') %in% names(settings)) )
     stop('settings need all entries: BQoffset, genome.')
   if ( !all(c('cpus') %in% names(runtimeSettings)) )
     stop('runtimeSettings need all entries: cpus.')
   
   cpus = runtimeSettings$cpus
-  outputToTerminalAsWell = runtimeSettings$outputToTerminalAsWell
   
   genome = settings$genome
   sampleMetaDataFile = inputFiles$metaDataFile
   vcfFiles = inputFiles$vcfFiles
   normalDirectory = inputFiles$normalDirectory
+  normalRdirectory = paste0(normalDirectory, '/R')
+  if ( !file.exists(normalRdirectory) ) {
+    dirSuccess = dir.create(normalRdirectory)
+    if ( !dirSuccess ) stop('Failed to create the normal R directory ', normalRdirectory,
+                            '. Note that parent directory must exist.')
+  }
   dbSNPdirectory = inputFiles$dbSNPdirectory
   captureRegionsFile = inputFiles$captureRegionsFile
 
-  Rdirectory = outputDirectories$Rdirectory
   plotDirectory = outputDirectories$plotDirectory
   BQoffset = settings$BQoffset
   
@@ -48,15 +116,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   if ( class(normalDirectory) != 'character' ) stop('normalDirectory needs to be of class character.')
   if ( !file.exists(normalDirectory) ) stop('normalDirectory ', normalDirectory, ' not found.')
   
-  
-  if ( !exists('Rdirectory') ) stop('Need to set Rdirectory.')
-  if ( class(Rdirectory) != 'character' ) stop('Rdirectory needs to be of class character.')
-  if ( !file.exists(Rdirectory) ) {
-    dirSuccess = dir.create(Rdirectory)
-    if ( !dirSuccess ) stop('Failed to create the Rdirectory ', Rdirectory,
-                            '. Note that parent directory must exist.')
-  }
-  
+    
   if ( !exists('plotDirectory') ) stop('Need to set plotDirectory.')
   if ( class(plotDirectory) != 'character' ) stop('plotDirectory needs to be of class character.')
   if ( !file.exists(plotDirectory) ) {
@@ -66,16 +126,9 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   }
 
 
-  #set up logfile and log start of run.
-  logFile = paste0(Rdirectory, '/runtimeTracking.log')
-  assign('catLog', function(...) cat(..., file=logFile, append=T), envir = .GlobalEnv)
-  if ( outputToTerminalAsWell )
-    assign('catLog', function(...) {cat(..., file=logFile, append=T); cat(...)}, envir = .GlobalEnv)
 
   cat('Runtime tracking and QC information printed to ', logFile, '.\n', sep='')
-  catLog('\n\n\n', as.character(Sys.time()),
-         '\n######################################################################\n',
-         'Starting run with input files:',
+  catLog('Starting run with input files:',
          '\nsampleMetaDataFile:', sampleMetaDataFile,
          '\nvcfFiles:\n')
   catLog(vcfFiles, sep='\n')
@@ -162,8 +215,6 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
     forceRedoRiver = T
   }
 
-  normalRdirectory = paste0(normalDirectory, '/R')
-  if ( !file.exists(normalRdirectory) ) dir.create(normalRdirectory)
   externalNormalBams = list.files(path=paste0(normalDirectory, '/bam'), pattern = '*.bam$', full.names=T)
   names(externalNormalBams) = gsub('.bam$', '', list.files(path=paste0(normalDirectory, '/bam'), pattern = '*.bam$'))
   externalNormalVcfs = list.files(path=paste0(normalDirectory, '/vcf'), pattern = '*.vcf$', full.names=T)
@@ -237,7 +288,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   fitS = try(runDE(bamFiles, names, externalNormalBams, captureRegions, Rdirectory, plotDirectory,
     normalRdirectory, cpus=cpus, forceRedoFit=forceRedoFit, forceRedoCount=forceRedoCount,
     forceRedoNormalCount=forceRedoNormalCount))
-  if ( class('fitS') == 'try-error' ) {
+  if ( class(fitS) == 'try-error' ) {
     catLog('Error in runDEforSamples! Input was:')
     catLog('bamFiles:', bamFiles, '\nnames:', names, '\nexternalNormalBams:', externalNormalBams,
            '\nstart(captureRegions)[1:4]:', start(captureRegions)[1:4], '\nRdirectory:', Rdirectory,
@@ -273,7 +324,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
       #import, filter and QC the variants. Save to file.
       #The information about normals is used for QC, as there will be only true frequencies of 0, 0.5 and 1 in those samples.
       variants = try(getVariants(vcfFiles, bamFiles, names, captureRegions, genome, BQoffset, dbSNPdirectory,
-        Rdirectory, plotDirectory, filterBoring=T, cpus=cpus, forceRedoSNPs=forceRedoSNPs,
+        Rdirectory, plotDirectory, cpus=cpus, forceRedoSNPs=forceRedoSNPs,
         forceRedoVariants=forceRedoVariants))
       if ( class(variants) == 'try-error' ) {
         catLog('Error in getVariants.\n')
@@ -282,15 +333,15 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
       
       #Get variants from the external normals
       normalVariants =
-        try(getVariants(externalNormalVcfs, externalNormalBams, names(externalNormalBams), captureRegions,
-                        genome, BQoffset, dbSNPdirectory, normalRdirectory, plotDirectory, filterBoring=F, cpus=cpus,
+        try(getNormalVariants(variants, externalNormalBams, names(externalNormalBams), captureRegions,
+                        genome, BQoffset, Rdirectory, Rdirectory, plotDirectory, cpus=cpus,
                         forceRedoSNPs=forceRedoNormalSNPs, forceRedoVariants=forceRedoNormalVariants))
       if ( class(normalVariants) == 'try-error' ) {
         catLog('Error in getVariants for normals.\n')
-        dumpInput(Rdirectory, list('externalNormalVcfs'=externalNormalVcfs, 'externalNormalBams'=externalNormalBams,
+        dumpInput(Rdirectory, list('variants'=variants, 'externalNormalBams'=externalNormalBams,
                                    'names'=names(externalNormalBams), 'captureRegions'=captureRegions,
                                    'genome'=genome, 'BQoffset'=BQoffset, 'dbSNPdirectory'=dbSNPdirectory,
-                                   'normalRdirectory'=normalRdirectory, 'plotDirectory'=plotDirectory, 'cpus'=cpus,
+                                   'Rdirectory'=Rdirectory, 'plotDirectory'=plotDirectory, 'cpus'=cpus,
                                    'forceRedoSNPs'=forceRedoNormalSNPs, 'forceRedoVariants'=forceRedoNormalVariants))
         stop('Error in getVariants for normals.')
       }
@@ -308,6 +359,12 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   }
   variants = allVariants$variants
   normalVariants = allVariants$normalVariants
+  a=try(setVariantLoss(normalVariants$variants))
+  if ( class(a) == 'try-error' ) {
+    catLog('Error in setVariantLoss(normalVariants)\n')
+    stop('Error in setVariantLoss(normalVariants)!')
+  }
+  
 
   #Make the scatter plots of the pairs
   source('makeScatterPlots.R')
@@ -394,5 +451,57 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   }
 
   catLog('Run done! Have fun with the output! :)\n\n')
-  return()
+  
+  return(list('fit'=fitS, 'variants'=variants, 'normalVariants'=normalVariants, 'cnvs'=cnvs, 'stories'=stories))
 }
+
+
+loadData = function(Rdirectory) {
+  saveFiles = list.files(Rdirectory, pattern = '*.Rdata', full.names=T)
+  names = gsub('.Rdata$', '', basename(saveFiles))
+  for ( file in saveFiles ) load(file=file)
+  ret = lapply(names, function(name) get(name))
+  return(ret)
+}
+
+forceRedoNothing = function() list(
+  'forceRedoCount'=F,
+  'forceRedoNormalCount'=F,
+  'forceRedoFit'=F,
+  'forceRedoVolcanoes'=F,
+  'forceRedoDifferentRegions'=F,
+  'forceRedoSNPs'=F,
+  'forceRedoVariants'=F,
+  'forceRedoNormalSNPs'=F,
+  'forceRedoNormalVariants'=F,
+  'forceRedoMatchFlag'=F,
+  'forceRedoScatters'=F,
+  'forceRedoOutputSomatic'=F,
+  'forceRedoNewVariants'=F,
+  'forceRedoSNPprogression'=F,
+  'forceRedoCNV'=F,
+  'forceRedoCNVplots'=F,
+  'forceRedoSummary'=F,
+  'forceRedoStories'=F,
+  'forceRedoRiver'=F)
+
+forceRedoEverything = function() list(
+  'forceRedoCount'=T,
+  'forceRedoNormalCount'=T,
+  'forceRedoFit'=T,
+  'forceRedoVolcanoes'=T,
+  'forceRedoDifferentRegions'=T,
+  'forceRedoSNPs'=T,
+  'forceRedoVariants'=T,
+  'forceRedoNormalSNPs'=T,
+  'forceRedoNormalVariants'=T,
+  'forceRedoMatchFlag'=T,
+  'forceRedoScatters'=T,
+  'forceRedoOutputSomatic'=T,
+  'forceRedoNewVariants'=T,
+  'forceRedoSNPprogression'=T,
+  'forceRedoCNV'=T,
+  'forceRedoCNVplots'=T,
+  'forceRedoSummary'=T,
+  'forceRedoStories'=T,
+  'forceRedoRiver'=T)

@@ -15,6 +15,7 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   if ( file.exists(fitPsaveFile) & !forceRedoFit & !forceRedoCount & !forceRedoNormalCount ) {
     catLog('Loading saved differential coverage results.\n')
     load(file=fitPsaveFile)
+    catLog('Loaded saved differential coverage results of dimension', dim(fitP), '\n')
     return(fitP)
   }
 
@@ -45,6 +46,7 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
     catLog('Loading counts from file..')
     load(fCsSaveFile)
     catLog('done.\n')
+    catLog('Loaded counts of dimension', dim(fCs$counts), '\n')
   }
 
   normalFCsSaveFile = paste0(normalRdirectory, '/normalFCs.Rdata')
@@ -67,6 +69,7 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
     catLog('Loading normals counts from file..')
     load(normalFCsSaveFile)
     catLog('done.\n')
+    catLog('Loaded normal counts of dimension', dim(normalFCs$counts), '\n')
   }
   catLog('Merging sample and normals counts..')
   counts = cbind(fCs$counts, normalFCs$counts)
@@ -192,9 +195,11 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   fitP$assignedNReads = assigned
   catLog('done.\n')
   
-  catLog('Saving fit..')
+  catLog('Saving fit of dimension', dim(fitP), '..')
   save(fitP, file=fitPsaveFile)
   catLog('done.\n')
+
+  catLog('Returning fit of dimension', dim(fitP), '\n')
   return(fitP)
 }
 

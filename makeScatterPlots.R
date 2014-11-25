@@ -136,16 +136,16 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
   cleanOrder = which(clean&use)[order((red-0.1*db)[clean&use])]
   col = rep('black', length(red))
   col[!clean&use] = rgb(0.6 + red[!clean&use]*0.4, 0.6+red[!clean&use]*0.2, 0.6)
-  col[clean&use] = rgb(red,0,(1-red)*pmin(1, q1$somaticP+q2$somaticP))[clean&use]
+  col[clean&use] = rgb(red,0,(1-red))[clean&use]
   cex = pmin(maxSize, sqrt(sqrt(q1$cov*q2$cov)/covScale))
   pch = ifelse(clean, ifelse(db, 4, 19), ifelse(db, 4, 1))
   plot(1, type='n', xlim=xlim, ylim=ylim, xlab = xlab, ylab = ylab, main=main)
   segments(c(0,1,0,0,0, 0.5, 0), c(0,0, 0,1,0, 0, 0.5), c(0, 1, 1, 1, 1, 0.5, 1), c(1, 1, 0, 1, 1, 1, 0.5), col = rgb(0.8, 0.8, 0.8), lwd=0.3)
   if ( !plotPosition ) {
     if ( plotFlagged )
-      legend('bottomright', c('clean non-db', 'flagged non-db', 'clean db', 'flagged db', 'significantly different', 'low coverage'), pch=c(19, 1, 4, 4, 19, 19), col=c('blue', 'grey', 'black', 'grey', 'red', 'black'), pt.cex=c(1,1,1,1,1,0.3))
+      legend('bottomright', c('clean non-db', 'flagged non-db', 'clean db', 'flagged db', 'significantly different', 'high coverage', 'low coverage'), pch=c(19, 1, 4, 4, 19, 19, 19), col=c('blue', 'grey', 'black', 'grey', 'red', 'black', 'black'), pt.cex=c(1,1,1,1,1,1,0.3))
     else
-      legend('bottomright', c('somatic', 'db', 'significantly different', 'low coverage'), pch=c(19, 4, 19, 19), col=c('blue', 'black', 'red', 'black'), pt.cex=c(1,1,1,0.3))
+      legend('bottomright', c('not in dbSNP', 'in dbSNP', 'significantly different', 'low coverage'), pch=c(19, 4, 19, 19), col=c('blue', 'black', 'red', 'black'), pt.cex=c(1,1,1,0.3))
     points(freq1[!clean&use], freq2[!clean&use], cex=cex[!clean&use],
            lwd=pmin(maxSize, sqrt(sqrt(q1$cov*q2$cov)[!clean&use]/covScale)), pch=pch[!clean&use], col=col[!clean&use])
     points(freq1[cleanOrder], freq2[cleanOrder], cex=cex[cleanOrder],

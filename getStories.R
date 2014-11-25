@@ -58,7 +58,7 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, Rdirectory, pl
 }
 
 findSNPstories = function(somaticQs, cnvs) {
-  cov10 = rowMeans(sapply(somaticQs, function(q) q$cov)) >= 10
+  cov10 = rowMeans(do.call(cbind, lapply(somaticQs, function(q) q$cov))) >= 10
   somaticQs = lapply(somaticQs, function(q) q[cov10,])
   somaticQs = findSNPclonalities(somaticQs, cnvs)
   clonality = matrix(sapply(somaticQs, function(q) q$clonality), ncol=length(somaticQs))

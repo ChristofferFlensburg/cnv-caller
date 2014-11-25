@@ -8,6 +8,8 @@ matchFlagVariants = function(variants, normalVariants, individuals, normals, Rdi
   if ( file.exists(saveFile) & !forceRedoMatchFlag ) {
     catLog('Loading final version of combined variants.\n')
     load(file=saveFile)
+    catLog('Estimating reference bias.\n')
+    setVariantLoss(allVariants$normalVariants$variants)
     return(allVariants)
   }
   variants = matchVariants(variants, normalVariants)
