@@ -1,4 +1,17 @@
 
+#' Analyse exomes
+#'
+#' This function runs a full SNV, SNP, CNV clonality analysis in the input exome data.
+#' @param inputFiles A named list of input files, containing the entries metaDataFile, vcfFiles, normalDirectory, captureRegionsFile and dbSNPdirectory
+#' @param outputDirectories A named list of output directories, containing the entries Rdirectory and plotDirectory where the saved data and plots will be stored respectively.
+#' @param settings A named list containing the entries genome and BQoffset. The only genome supporter atm is 'hg19', and the BQ offset is 33 for most exomes, altough some have 64. Check your fastqc files if you are not sure.
+#' @param forceRedo A named list of logicals controling if existing saved data should be loaded or regenerated (overwriting the previous saved data). shortcuts to create these lists are forceRedoNothing() and forceRedoEverything().
+#' @param runtimeSettings A named list containing the entries cpus and outputToTerminalAsWell. cpus is an integer controling the maximum number of cpus used in parallel, and outputToTerminalAsWell prints log data to the R session as well as to the log file.
+#' @keywords analyse exomes CNV clonality
+#' @export
+#' @examples
+#' analyse()
+
 analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSettings) {
   source('debug.R')
 
@@ -455,14 +468,66 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   return(list('fit'=fitS, 'variants'=variants, 'normalVariants'=normalVariants, 'cnvs'=cnvs, 'stories'=stories))
 }
 
+#' Loads saved data
+#'
+#' This function returns the data produced from an analyse() run.
+#' @param Rdirectory A character string pointing to the Rdirectory of the analyse() run.
+#' @keywords load saved data
+#' @export
+#' @examples
+#' loadData()
 
 loadData = function(Rdirectory) {
   saveFiles = list.files(Rdirectory, pattern = '*.Rdata', full.names=T)
   names = gsub('.Rdata$', '', basename(saveFiles))
-  for ( file in saveFiles ) load(file=file)
+  names(names) = saveFiles
+  cat('Loading..')
+  for ( file in saveFiles ) {
+    cat(gsub('.Rdata$', '', basename(file)), '..', sep='')
+    names[file] = load(file=file)
+  }
+  cat('done.\n')
   ret = lapply(names, function(name) get(name))
+  names(ret) = gsub('.Rdata$', '', basename(saveFiles))
+
   return(ret)
 }
+
+#' Loads methods.
+#'
+#' This function loads the analysis functions used in analyse().
+#' @keywords load methods analyse
+#' @export
+#' @examples
+#' loadMethods()
+
+loadMethods = function() {
+  source('debug.R')
+  source('importCaptureRegions.R')
+  source('importSampleMetaData.R')
+  source('runDE.R')
+  source('XRank.R')
+  source('makeFitPlots.R')
+  source('getVariants.R')
+  source('matchFlagVariants.R')
+  source('makeScatterPlots.R')
+  source('outputNewVariants.R')
+  source('outputSomaticVariants.R')
+  source('makeSNPprogressionPlots.R')
+  source('callCNVs.R')
+  source('makeCNVplots.R')
+  source('makeSummaryPlot.R')
+  source('getStories.R')
+  source('makeRiverPlots.R')
+}
+
+#' returns input that uses saved data if present.
+#'
+#' This function returns the input 'forceRedo' for analyse(), so that saved data from previous runs is used if present.
+#' @keywords forceRedo
+#' @export
+#' @examples
+#' loadData()
 
 forceRedoNothing = function() list(
   'forceRedoCount'=F,
@@ -484,6 +549,14 @@ forceRedoNothing = function() list(
   'forceRedoSummary'=F,
   'forceRedoStories'=F,
   'forceRedoRiver'=F)
+
+#' returns input that doesn't use saved data.
+#'
+#' This function returns the input 'forceRedo' for analyse(), so that saved data from previous runs is never used, and any present saved data is overwritten.
+#' @keywords forceRedo
+#' @export
+#' @examples
+#' loadData()
 
 forceRedoEverything = function() list(
   'forceRedoCount'=T,

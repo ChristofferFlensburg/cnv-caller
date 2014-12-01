@@ -11,7 +11,7 @@ makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, ge
     if ( !file.exists(dir1) ) dir.create(dir1)
     dir2 = paste0(dir1, '/', pair[2])
     if ( !file.exists(dir2) | forceRedo ) {
-      dir.create(dir2)
+      if ( !file.exists(dir2) ) dir.create(dir2)
       boring = variants$variants[[pair[1]]]$var == 0 & variants$variants[[pair[2]]]$var == 0
       q1 = variants$variants[[pair[1]]][!boring,]
       q2 = variants$variants[[pair[2]]][!boring,]

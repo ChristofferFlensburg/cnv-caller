@@ -10,10 +10,12 @@ makeRiverPlots = function(stories, variants, plotDirectory, forceRedo=forceRedoR
     catLog('Making riverplot for ', ts, '..', sep='')
     labels = lapply(stories[[ts]]$clusters$storyList, function(rows) storyToLabel(stories[[ts]]$all[rows,], variants$SNPs))
     pdf(file, width=15, height=10)
-    plotRiver(stories[[ts]]$cloneTree, stories[[ts]]$clusters$cloneStories, labels)
-    plotStories(stories[[ts]]$clusters$cloneStories)
+    cloneCols = plotRiver(stories[[ts]]$cloneTree, stories[[ts]]$clusters$cloneStories, labels)
+    plotStories(stories[[ts]]$clusters$cloneStories, variants$SNPs, col=cloneCols)
     for ( subclone in names(stories[[ts]]$clusters$storyList) ) {
-      plotStories(stories[[ts]]$all[stories[[ts]]$clusters$storyList[[subclone]],])
+      i = which(names(stories[[ts]]$clusters$storyList) == subclone)
+      plotStories(stories[[ts]]$all[stories[[ts]]$clusters$storyList[[subclone]],], variants$SNPs, alpha=0.2)
+      plotStories(stories[[ts]]$clusters$cloneStories[i,], variants$SNPs, add=T, col=cloneCols[i])
     }
     dev.off()
     catLog('done.\n')
@@ -41,8 +43,10 @@ plotRiver = function(cloneTree, cloneStories, cloneLabels) {
   purity = sapply(1:ncol(cloneStories$stories), function(i) max(abs(stories[names(cloneTree[[1]]),i])))
   stories[stories < cloneStories$errors*2] = 0
   stories = t(t(stories)/purity)
+  stories = cbind(rep(0, nrow(stories)), stories)
+  colnames(stories)[1] = 'normal'
   x = 1:ncol(stories)
-
+  
   par(oma=rep(0, 4))
   par(mar=c(0, 4, 0, 0))
   plot(1, type='n', xlim=c(1, max(x)+ceiling(nrow(cloneStories)/2)), ylim=c(0,1), xaxt='n', frame.plot=F,
@@ -65,12 +69,14 @@ plotRiver = function(cloneTree, cloneStories, cloneLabels) {
 
   par(oma=rep(0, 4))
   par(mar=rep(4, 4))
+
+  return(cloneCols)
 }
 
 
 #plots a set of parallel disjoint clones, and recurs to each clones subclones to be plotted on top.
 addSubclone = function(cT, stories, ylims, colourPool=c(), margin=0.02) {
-  if ( length(colourPool) == 0 ) colourPool = mcri(c('darkblue', 'blue', 'green', 'red', 'orange', 'magenta', 'cyan', 'violet', 'lightblue', 'black', 'grey'))
+  if ( length(colourPool) == 0 ) colourPool = mcri(c('black', 'blue', 'red', 'green', 'orange', 'magenta', 'cyan', 'violet', 'lightblue', 'grey', 'darkblue'))
   subClones = names(cT)
   subStories = stories[names(cT),,drop=F]
   maxSize = ylims[2,]-ylims[1,]
@@ -157,7 +163,7 @@ addStreamSegment = function(x1, x2, y1low, y1high, y2low, y2high, range=c(0,1), 
 }
 
 
-plotStories = function(stories, col='default') {
+plotStories = function(stories, SNPs, col='default', add=F, alpha=1, xlab='sample', ylab='clonality',...) {
   names = rownames(stories)
   clon = stories$stories
   ce = stories$errors
@@ -165,23 +171,25 @@ plotStories = function(stories, col='default') {
   Nsample = ncol(clon)
   Nmut = nrow(clon)
 
-  if ( col[1] == 'default' ) {
-    segcol = randomCols(row(clon)[,2:Nsample])
-    errcol = randomCols(row(clon))
+  if ( col[1] == 'default' | length(col) != Nmut ) {
+    segcol = randomCols(row(clon)[,2:Nsample], a=alpha)
+    errcol = randomCols(row(clon), a=alpha)
   }
   else if ( length(col) == Nmut ) {
     segcol = rep(col, Nsample-1)
     errcol = rep(col, Nsample)
   }
 
-  plot(0,0, type='n', xlim=c(1, Nsample), ylim=c(min(0, min(clon)),1))
+  if ( !add ) plot(0,0, type='n', xlim=c(1, Nsample*1.3), ylim=c(min(0, min(clon)),1), xlab=xlab, ylab=ylab, ...)
   lwd = 1/(sqrt(0.1^2+ce[,1:(Nsample-1)]^2 + ce[,2:Nsample]^2)/0.2)^2
-  segments(col(clon)[,1:(Nsample-1)]+(row(clon)[,1:(Nsample-1)] - Nmut/2)/Nmut/4, clon[,1:(Nsample-1)],
-           col(clon)[,2:Nsample    ]+(row(clon)[,2:Nsample    ] - Nmut/2)/Nmut/4, clon[,2:Nsample    ],
+  segments(col(clon)[,1:(Nsample-1)]+(row(clon)[,1:(Nsample-1)] - 0.5 - Nmut/2)/Nmut/4, clon[,1:(Nsample-1)],
+           col(clon)[,2:Nsample    ]+(row(clon)[,2:Nsample    ] - 0.5 - Nmut/2)/Nmut/4, clon[,2:Nsample    ],
            col=segcol, lwd=lwd)
   lwd = 1/(sqrt(0.1^2+ce^2)/0.2)^2
-  segments(col(clon)+(row(clon) - Nmut/2)/Nmut/4, clon - ce,
-           col(clon)+(row(clon) - Nmut/2)/Nmut/4, clon + ce,
+  segments(col(clon)+(row(clon) - 0.5 - Nmut/2)/Nmut/4, clon - ce,
+           col(clon)+(row(clon) - 0.5 - Nmut/2)/Nmut/4, clon + ce,
            col=errcol, lwd=lwd)
+
+  if ( !add ) legend('right', storyToLabel(stories, SNPs), lwd=5, col=errcol[1:nrow(stories)])
 
 }

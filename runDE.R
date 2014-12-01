@@ -23,7 +23,6 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   captureAnnotation = try(captureRegionToAnnotation(captureRegions))
   if ( class('captureAnnotation') == 'try-error' ) stop('Error in captureRegionToAnnotation.')
   if ( !('GeneID' %in% colnames(captureAnnotation)) ) stop('captureAnnotation does not have a GeneID.')
-  captureAnnotation$GeneID = gsub('.*:', '', captureAnnotation$GeneID)
   catLog('done.\n')
   
   fCsSaveFile = paste0(Rdirectory, '/fCs.Rdata')
@@ -119,9 +118,12 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   if ( !file.exists(MAdirectory) ) dir.create(MAdirectory)
   for ( col in colnames(counts) ) {
     catLog(col, '..', sep='')
-    png(paste0(MAdirectory, col, '.png'), height=2000, width=4000, res=144)
-    plotMA(counts[,col], normalMean, loess=T, span=0.5, verbose=F, main = paste0(col, ' vs normals (before loess normalisation)'))
-    dev.off()
+    plotfile = paste0(MAdirectory, col, '.png')
+    if ( !file.exists(plotfile) | forceRedoFit ) {
+      png(plotfile, height=2000, width=4000, res=144)
+      plotMA(counts[,col], normalMean, loess=T, span=0.5, verbose=F, main = paste0(col, ' vs normals (before loess normalisation)'))
+      dev.off()
+    }
   }
   catLog('done.\n')  
 
@@ -139,9 +141,10 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   genes = rownames(counts)
   regionNames = captureRegions$region
   gc = as.numeric(captureRegions$gc)
-  widths = width(captureRegions)
+  widths = noneg(width(captureRegions))+1
   gc = sapply(genes, function(gene) {
     is = which(regionNames == gene)
+    if ( length(is) == 0 ) return(0)
     return(sum(gc[is]*widths[is])/sum(widths[is]))
   })
   correctionFactor = list()
@@ -149,19 +152,41 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   if ( !file.exists(GCdirectory) ) dir.create(GCdirectory)
   for (col in colnames(counts)) {
     catLog(col, '..', sep='')
-    png(paste0(GCdirectory, col, '.png'), height=2000, width=4000, res=144)
     lo = loess(cov~gc, data=data.frame(cov=log((1+counts[,col])/(annotation$Length)), gc=gc),
       weights=noneg(annotation$Length-100), span=0.3, family='symmetric', degrees=1)
     los = exp(predict(lo, gc))
     correctionFactor[[col]] = pmin(10, pmax(0.1, (1/los)/mean(1/los)))
     correctionFactor[[col]] = correctionFactor[[col]]*sum(counts[,col])/sum(counts[,col]*correctionFactor[[col]])
-    plotColourScatter(gc, (counts[,col]/(annotation$Length)), ylim=c(0,2), cex=pmin(3,sqrt(annotation$Length/1000))*1.5, main=col, xlab='GC content', ylab='reads/bp', verbose=F)
-    lines((0:100)/100, exp(predict(lo, (0:100)/100)), lwd=5, col=mcri('orange'))
-    legend('topleft', 'loess fit', lwd=5, col=mcri('orange'))
-    dev.off()
+    plotfile = paste0(GCdirectory, col, '.png')
+    if ( !file.exists(plotfile) | forceRedoFit ) {
+      png(plotfile, height=2000, width=4000, res=144)
+      plotColourScatter(gc, (counts[,col]/(annotation$Length)), ylim=c(0,2), cex=pmin(3,sqrt(annotation$Length/1000))*1.5, main=col, xlab='GC content', ylab='reads/bp', verbose=F)
+      lines((0:100)/100, exp(predict(lo, (0:100)/100)), lwd=5, col=mcri('orange'))
+      legend('topleft', 'loess fit', lwd=5, col=mcri('orange'))
+      dev.off()
+    }
   }
   correctionFactor = do.call(cbind, correctionFactor)
   catLog('done.\n')
+
+  #MA plots after loess and GC correcrion
+  diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
+  if ( !file.exists(diagnosticPlotsDirectory) ) dir.create(diagnosticPlotsDirectory)
+  catLog('Making MA plots of coverage after loess and GC correction in diagnostics directory..')
+  normalMean = rowMeans(counts[,group=='normal'])
+  MAdirectory = paste0(diagnosticPlotsDirectory, '/MAplotsAfter/')
+  if ( !file.exists(MAdirectory) ) dir.create(MAdirectory)
+  for ( col in colnames(counts) ) {
+    catLog(col, '..', sep='')
+    plotfile = paste0(MAdirectory, col, '.png')
+    if ( !file.exists(plotfile) | forceRedoFit ) {
+      png(plotfile, height=2000, width=4000, res=144)
+      plotMA(counts[,col], normalMean, loess=T, span=0.5, verbose=F, main = paste0(col, ' vs normals (before loess normalisation)'))
+      dev.off()
+    }
+  }
+  catLog('done.\n')  
+
 
 
   catLog('Running voom..')
@@ -289,93 +314,42 @@ annotationToChr = function( annotation ) {
 
 
 #helper function that MA-plots two vectors
-plotMA = function(x, y, col=mcri('darkblue'), coloured=T, libNorm = F, span=0.2,
-  xlab='A = log2(x*y)/2', ylab='M = log2(x/y)', labelLimit = Inf, removeZero=F, loess=F,
-  poisErr=F, add=F, smear=1, returnMarked=F, dontPlot=F, cex=0.6, pch=16, verbose=T, ...) {
+plotMA = function(x, y, col=mcri('darkblue'), libNorm = F, span=0.2,
+  xlab='A = log2(x*y)/2', ylab='M = log2(x/y)', loess=F, cex=0.6, pch=16, verbose=T, ...) {
   Nx = sum(x)
   Ny = sum(y)
-  if ( labelLimit < Inf ) {
-    print = pvals(x+y, x, Nx/(Nx+Ny)) < labelLimit
-  }
   if ( libNorm ) {
     x = x/Nx
     y = y/Ny
   }
-  if ( removeZero ) {
-    keep = x > 0 & y > 0
-    x = x[keep]
-    y = y[keep]
+  xmin = ymin = 1
+  if ( libNorm ) {
+    xmin = smear/Nx
+    ymin = smear/Ny
   }
-  if ( smear > 0 ) {
-    xmin = ymin = smear
-    if ( libNorm ) {
-      xmin = smear/Nx
-      ymin = smear/Ny
-    }
-    x = xmin*0.2 + noneg(xmin*0.8 + x + pmax(-0.45*xmin, pmin(0.45*xmin, rnorm(length(x), 0, xmin*0.15))))
-    y = ymin*0.2 + noneg(ymin*0.8 + y + pmax(-0.45*xmin, pmin(0.45*xmin, rnorm(length(y), 0, ymin*0.15))))
-  }
-  else {
-    x = x
-    y = y
-  }
+  x = xmin*0.2 + noneg(xmin*0.8 + x + pmax(-0.45*xmin, pmin(0.45*xmin, rnorm(length(x), 0, xmin*0.15))))
+  y = ymin*0.2 + noneg(ymin*0.8 + y + pmax(-0.45*xmin, pmin(0.45*xmin, rnorm(length(y), 0, ymin*0.15))))
   A = log2(x*y)/2
   M = log2(x/y)
-  if ( !dontPlot ) {
-    if ( !add )
-      plot(A, M, cex=cex, pch=pch, xlab=xlab, ylab=ylab, yaxt='n',
-           col=col, ...)
-    else
-      points(A, M, cex=cex, pch=pch, col=col, ...)
-    segments(rep(-30, 5), c(0,-1,1, log2(c(10, 0.1))), rep(30,5), c(0,-1,1, log2(c(10, 0.1))), col=rgb(.5, .5, .5, .2), lwd=2)
-    if ( coloured ) {
-      points(A, M, cex=2/3*cex, pch=pch,
-             col=mcri('blue', 0.4))
-      points(A, M, cex=1/2*cex, pch=pch,
-             col=mcri('azure', 0.1))
-      points(A, M, cex=1/3*cex, pch=pch,
-             col=mcri('green', 0.02))
-    }
-    if ( !add )
-      axis(2, at=c(log2(0.1), -1, 0,1,log2(10)), labels=c('log2(0.1)', '-1', '0', '1', 'log2(10)'), cex.axis=1)
+  plot(A, M, cex=cex, pch=pch, xlab=xlab, ylab=ylab, yaxt='n', col=col, ...)
+  segments(rep(-30, 5), c(0,-1,1, log2(c(10, 0.1))), rep(30,5), c(0,-1,1, log2(c(10, 0.1))), col=rgb(.5, .5, .5, .2), lwd=2)
+    points(A, M, cex=2/3*cex, pch=pch,
+           col=mcri('blue', 0.4))
+    points(A, M, cex=1/2*cex, pch=pch,
+           col=mcri('azure', 0.1))
+    points(A, M, cex=1/3*cex, pch=pch,
+           col=mcri('green', 0.02))
+  axis(2, at=c(log2(0.1), -1, 0,1,log2(10)), labels=c('log2(0.1)', '-1', '0', '1', 'log2(10)'), cex.axis=1)
     
-    if ( poisErr ) {
-      As = (0:300)/10
-      xs = 10^(As)*Nx/(Nx+Ny)
-      ys = 10^(As)*Ny/(Nx+Ny)
-      deltas = sqrt(log2(1+1/sqrt(xs))^2 + log2(1+1/sqrt(ys))^2)
-      if ( libNorm ) As = As - log2((Nx+Ny)/2)
-      lines(As, deltas, col=mcri('orange', 0.7), lwd=3)
-      lines(As, -deltas, col=mcri('orange', 0.7), lwd=3)
-    }
-  }
-
-  #name the outliers if required.
-  ret = c()
-  if ( labelLimit < Inf ) {
-    shift = (max(M) - min(M))*0.02
-    print[is.na(print)] = F
-    if ( sum(print) > 0 ) {
-      factor = abs(M)/(labelLimit*(max(A) - A)^2)
-      nms = names(x)
-      if ( is.null(nms) ) nms = 1:length(x)
-      if ( !dontPlot ) {
-        text(A[print], M[print] + shift, nms[print], cex=0.7)
-        if ( verbose ) cat('Highlighting genes ', nms[print], '\n')
-      }
-      ret = nms[print]
-    }
-  }
-
-  if ( loess & !dontPlot ) {
+  if ( loess ) {
     if ( verbose ) cat('Calculating loess fit...')
     lo = loess(M~A, data.frame(M, A), control=loess.control(trace.hat = 'approximate'), span=span)
     if ( verbose ) cat('done.\n')
     As = min(A) + (0:100)/100*(max(A) - min(A))
     lines(As, predict(lo, As), col=mcri('orange'), lwd=6)
   }
-  return(ret)
 }
+
 #helper function that returns the mcri version of the provided colour(s) if available
 #Otherwise returns the input. Call without argument to see available colours
 mcri = function(col=0, al=1) {
@@ -429,3 +403,30 @@ plotColourScatter = function(x, y, xlab='', ylab='', col=mcri('darkblue'), main=
 
 #helper function that replaces negative values with 0.
 noneg = function(x) return(ifelse(x < 0, 0, x))
+
+#helper wrappers of colSums etc that handle non-matrices.
+colsums = function(mx) {
+  if ( !is.matrix(mx) ) return(mx)
+  else (colSums(mx))
+}
+rowsums = function(mx) {
+  if ( !is.matrix(mx) ) return(mx)
+  else (rowSums(mx))
+}
+colmeans = function(mx) {
+  if ( !is.matrix(mx) ) return(mx)
+  else (colMeans(mx))
+}
+rowmeans = function(mx) {
+  if ( !is.matrix(mx) ) return(mx)
+  else (rowMeans(mx))
+}
+
+#normalise all columns to the average column size
+libNorm = function(mx) {
+  if ( !is.matrix(mx) ) return(mx)
+  sizes = colSums(mx)
+  av = mean(colSums(mx))
+  ret = t(t(mx)*av/sizes)
+  return(ret)
+}

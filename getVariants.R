@@ -84,11 +84,14 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
     if ( !file.exists(FreqDirectory) ) dir.create(FreqDirectory)
     for ( sample in names(variants) ) {
       catLog(sample, '..', sep='')
-      png(paste0(FreqDirectory, sample, '.png'), height=2000, width=4000, res=144)
+      png(paste0(FreqDirectory, sample, '-varcov.png'), height=2000, width=4000, res=144)
       use = variants[[sample]]$cov > 0
       plotColourScatter((variants[[sample]]$var/variants[[sample]]$cov)[use], variants[[sample]]$cov[use],
                         log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
-      hist(variants[[sample]]$var/variants[[sample]]$cov, breaks=(0:100)/100, col=mcri('blue'))
+      dev.off()
+      png(paste0(FreqDirectory, sample, '-hist.png'), height=2000, width=4000, res=144)
+      use = variants[[sample]]$var > 0
+      hist((variants[[sample]]$var/variants[[sample]]$cov)[use], breaks=(0:100)/100, col=mcri('blue'))
       dev.off()
     }
     catLog('done.\n')  

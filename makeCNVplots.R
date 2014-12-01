@@ -188,21 +188,4 @@ randomCols = function(i, a=1, noBlack=F) {
   return(sapply(1:length(i), function(I) randomCol(i[I], a[I], noBlack=noBlack)))
 }
 
-#helper wrappers of colSums etc that handle non-matrices.
-colsums = function(mx) {
-  if ( !is.matrix(mx) ) return(mx)
-  else (colSums(mx))
-}
-rowsums = function(mx) {
-  if ( !is.matrix(mx) ) return(mx)
-  else (rowSums(mx))
-}
-colmeans = function(mx) {
-  if ( !is.matrix(mx) ) return(mx)
-  else (colMeans(mx))
-}
-rowmeans = function(mx) {
-  if ( !is.matrix(mx) ) return(mx)
-  else (rowMeans(mx))
-}
 

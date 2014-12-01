@@ -292,7 +292,7 @@ mergeRegions = function(cR, minScore = 0.05, plot=F, debug=F) {
   merged = c()
   scores = c()
   if ( debug ) Nloop = 0
-  pairScore = sameCNV(cR) #update to only refresh the affected row/column
+  pairScore = sameCNV(cR)
   while(dim(cR)[1] > 1) {
     #find the pair of regions with the largest pairing probability
     best = which(pairScore == max(pairScore))[1]
