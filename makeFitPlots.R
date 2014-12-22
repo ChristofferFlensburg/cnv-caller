@@ -4,7 +4,7 @@ require(WriteXLS)
 
 #takes a fit object for the differential coverage between samples and normals, and plots volcano plots
 #also outputs differential coverage to an excel file.
-makeFitPlots = function(fit, plotDirectory, forceRedoVolcanoes=F, forceRedoDifferentRegions=F) {
+makeFitPlots = function(fit, plotDirectory, genome, forceRedoVolcanoes=F, forceRedoDifferentRegions=F) {
   dirname = paste0(plotDirectory, '/volcanoes/')
   if ( !file.exists(dirname) ) dir.create(dirname)
 
@@ -36,8 +36,8 @@ makeFitPlots = function(fit, plotDirectory, forceRedoVolcanoes=F, forceRedoDiffe
       
       tops[[col]] = data.frame(
             'captureRegion'=rownames(fit),
-            'chr'=xToChr(fit$x),
-            'pos'=xToPos(fit$x),
+            'chr'=xToChr(fit$x, genome=genome),
+            'pos'=xToPos(fit$x, genome=genome),
             'LFC'=fit$coefficients[,col],
             'width'=abs(fit$coefficients/fit$t)[,col],
             'p-value'=fit$p.value[,col],

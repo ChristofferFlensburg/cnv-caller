@@ -99,7 +99,7 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
   
   clean = flag1 == '' & flag2 == ''
   
-  if ( verbose ) cat(sum(clean), 'out of', nrow(q1), 'non-zero variants are not flagged!\n')
+  if ( verbose ) catLog(sum(clean), 'out of', nrow(q1), 'non-zero variants are not flagged!\n')
 
   if ( !plotFlagged ) {
     q1 = q1[clean,]
@@ -125,7 +125,7 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
     names(ps) = rownames(q1)
   }
   dof = max(20, sum(clean & freq1+freq2 > 0 & freq1+freq2 < 2))
-  if ( verbose ) cat('MHC done with effective dof', dof, '\n')
+  if ( verbose ) catLog('MHC done with effective dof', dof, '\n')
   red = pmin(1, pmax(0, (-log10(ps)/log10(dof) - 0.75)))
 
   covScale = 100
@@ -136,7 +136,7 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
   cleanOrder = which(clean&use)[order((red-0.1*db)[clean&use])]
   col = rep('black', length(red))
   col[!clean&use] = rgb(0.6 + red[!clean&use]*0.4, 0.6+red[!clean&use]*0.2, 0.6)
-  col[clean&use] = rgb(red,0,(1-red))[clean&use]
+  col[clean&use] = rgb(red,0,ifelse(db, 0,(1-red)))[clean&use]
   cex = pmin(maxSize, sqrt(sqrt(q1$cov*q2$cov)/covScale))
   pch = ifelse(clean, ifelse(db, 4, 19), ifelse(db, 4, 1))
   plot(1, type='n', xlim=xlim, ylim=ylim, xlab = xlab, ylab = ylab, main=main)
@@ -180,11 +180,7 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
       printNames[is.na(printNames)] = 'i'
       if ( length(toPrint) > 0 )
         text(freq1[toPrint], freq2[toPrint] + 0.015*pmax(0.6, cex[toPrint]), printNames, col = col[toPrint], cex = pmax(0.6, cex[toPrint]))
-      if ( verbose ) {
-        cat('Highlighting', length(unique(printNames)), 'genes.\n')
-        if (any(DLBCLgenes() %in% printNames) )  cat('DLBCL gene! ', intersect(DLBCLgenes(), printNames), '\n')
-        if (any(AMLgenes() %in% printNames) )  cat('AML gene! ', intersect(AMLgenes(), printNames), '\n')
-      }
+      if ( verbose ) catLog('Highlighting', length(unique(printNames)), 'genes.\n')
       if ( outputHighlighted ) {
         out = data.frame('chr'=SNPs[toPrint,]$chr, 'pos'=SNPs[toPrint,]$start, 'x'=SNPs[toPrint,]$x, 'var'=q1$variant[toPrint], 'gene'=printNames,
           'f1'=freq1[toPrint], 'f2'=freq2[toPrint])

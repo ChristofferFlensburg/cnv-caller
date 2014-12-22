@@ -62,7 +62,7 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
     catLog('Calculating variants:\n')
     gc()
     variants = lapply(bamFiles, function(file) {
-      QCsnps(pileups=importQualityScores(SNPs, file, BQoffset, cpus=cpus)[[1]], SNPs=SNPs, cpus=cpus)})
+      QCsnps(pileups=importQualityScores(SNPs, file, BQoffset, genome=genome, cpus=cpus)[[1]], SNPs=SNPs, cpus=cpus)})
     names(variants)=names
     variants = shareVariants(variants)
     
@@ -76,7 +76,7 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
     catLog('Saving variants..')
     save(variants, file=variantsSaveFile)
     catLog('done.\n')
-
+    
     diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
     if ( !file.exists(diagnosticPlotsDirectory) ) dir.create(diagnosticPlotsDirectory)
     FreqDirectory = paste0(diagnosticPlotsDirectory, '/frequencyDistribution/')
@@ -84,13 +84,15 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
     if ( !file.exists(FreqDirectory) ) dir.create(FreqDirectory)
     for ( sample in names(variants) ) {
       catLog(sample, '..', sep='')
-      png(paste0(FreqDirectory, sample, '-varcov.png'), height=2000, width=4000, res=144)
       use = variants[[sample]]$cov > 0
+      png(paste0(FreqDirectory, sample, '-varcov.png'), height=2000, width=4000, res=144)
       plotColourScatter((variants[[sample]]$var/variants[[sample]]$cov)[use], variants[[sample]]$cov[use],
                         log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
       dev.off()
+    }
+    use = variants[[sample]]$var > 0
+    if ( any(use) ) {
       png(paste0(FreqDirectory, sample, '-hist.png'), height=2000, width=4000, res=144)
-      use = variants[[sample]]$var > 0
       hist((variants[[sample]]$var/variants[[sample]]$cov)[use], breaks=(0:100)/100, col=mcri('blue'))
       dev.off()
     }
@@ -157,7 +159,7 @@ varScanSNPToMut = function(files, genome='hg19') {
 #helper function converting from chr+bp coordinates into a single coordinate x that runs over all chromosomes.
 chrToX = function(chr, bp, genome='hg19') {
   prevChrL = c(0, cumsum(chrLengths(genome)))
-  names(prevChrL) = c(names(humanChrLengths()), 'outside')
+  names(prevChrL) = c(names(chrLengths(genome)), 'outside')
   return(prevChrL[gsub('chr', '', chr)] + bp)
 }
 
@@ -182,7 +184,7 @@ flagStrandBias = function(SNPs) {
 #hepler function that marks the variants in a SNPs object as db or non db SNPs.
 matchTodbSNPs = function(SNPs, dir='~/data/dbSNP', genome='hg19') {
   SNPs$db = rep(NA, nrow(SNPs))
- chrs = names(chrLengths())
+  chrs = names(chrLengths(genome))
   for (chr in chrs ) {
     if ( !any(SNPs$chr == chr) ) {
       catLog('Chromosome ', chr, ': no SNPs found in this chromosome, done.\n', sep='')
@@ -200,7 +202,7 @@ matchTodbSNPs = function(SNPs, dir='~/data/dbSNP', genome='hg19') {
     catLog('matching to sample postions..')
     chrSNPsI = which(SNPs$chr == chr)
     SNPs$db[chrSNPsI] = (SNPs$start[chrSNPsI] + ifelse(grepl('[-]', SNPs$variant[chrSNPsI]), 1, 0)) %in% dbPos
-    catLog('done.\n')
+    catLog('marked ', sum(SNPs$db[chrSNPsI]), ' positions as dbSNPs.\n')
   }
   return(SNPs)
 }
@@ -212,9 +214,10 @@ matchTodbSNPs = function(SNPs, dir='~/data/dbSNP', genome='hg19') {
 
 #helper functions that counts reads in favour of reference and any present variant
 #at the given locations for the given bam files.
-importQualityScores = function(SNPs, files, BQoffset, cpus=10) {
+importQualityScores = function(SNPs, files, BQoffset, genome='hg19', cpus=10) {
   ret=list()
   chr = as.character(SNPs$chr)
+  if ( genome == 'mm10' ) chr = paste0('chr', chr)
   for ( file in files ) {
     catLog('Importing', length(chr), 'pileups by chr from', file, '\n')
     if ( cpus > 1 ) {
@@ -628,7 +631,7 @@ getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, 
     catLog('Calculating variants:\n')
     gc()
     variants = lapply(bamFiles, function(file) {
-      QCsnps(pileups=importQualityScores(SNPs, file, BQoffset, cpus=cpus)[[1]], SNPs=SNPs, cpus=cpus)})
+      QCsnps(pileups=importQualityScores(SNPs, file, BQoffset, genome=genome, cpus=cpus)[[1]], SNPs=SNPs, cpus=cpus)})
     names(variants)=names
     variants = shareVariants(variants)
     
@@ -644,11 +647,13 @@ getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, 
     if ( !file.exists(FreqDirectory) ) dir.create(FreqDirectory)
     for ( sample in names(variants) ) {
       catLog(sample, '..', sep='')
-      png(paste0(FreqDirectory, sample, '-scatter.png'), height=2000, width=4000, res=144)
       use = variants[[sample]]$cov > 0
-      plotColourScatter((variants[[sample]]$var/variants[[sample]]$cov)[use], variants[[sample]]$cov[use],
-                        log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
-      dev.off()
+      if ( any(use) ) {
+        png(paste0(FreqDirectory, sample, '-scatter.png'), height=2000, width=4000, res=144)
+        plotColourScatter((variants[[sample]]$var/variants[[sample]]$cov)[use], variants[[sample]]$cov[use],
+                          log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
+        dev.off()
+      }
       png(paste0(FreqDirectory, sample, '-hist.png'), height=2000, width=4000, res=144)
       hist(variants[[sample]]$var/variants[[sample]]$cov, breaks=(0:100)/100, col=mcri('blue'))
       dev.off()

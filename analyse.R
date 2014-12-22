@@ -237,7 +237,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   catLog(externalNormalVcfs, sep='\n')
 
   source('importCaptureRegions.R')
-  captureRegions = try(importCaptureRegions(captureRegionsFile, gcColumn=5))
+  captureRegions = try(importCaptureRegions(captureRegionsFile, gcColumn=5, genome=genome))
   if ( class(captureRegions) != 'GRanges' ) {
     catLog('Failed to import capture regions, aborting.\n')
     stop('Failed to import capture regions, aborting.\n')
@@ -280,10 +280,21 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   timePoints = sampleMetaData$TIMEPOINT
   names(timePoints) = names(individuals) = names
   normals = as.logical(gsub('YES', 'T', gsub('NO', 'F', sampleMetaData$NORMAL)))
+  names(normals) = names
   samplePairs = metaToSamplePairs(names, individuals, normals)
   timeSeries = metaToTimeSeries(names, individuals, normals)
+
+  if ( any(!file.exists(bamFiles)) ) {
+    catLog('Missing (or misnamed) bam files:' , bamFiles[!file.exists(bamFiles)], ', aborting.\n')
+    stop('Missing (or misnamed) bam files:' , bamFiles[!file.exists(bamFiles)], ', aborting.\n')
+  }
+  bamIndexFiles = paste0(bamFiles, '.bai')
+  if ( any(!file.exists(bamIndexFiles)) ) {
+    catLog('Missing (or misnamed) bam index files:' , bamIndexFiles[!file.exists(bamIndexFiles)], ', aborting.\n')
+    stop('Missing (or misnamed) bam index files:' , bamIndexFiles[!file.exists(bamIndexFiles)], ', aborting.\n')
+  }
   
-  catLog('#############################################################\n\n',
+  catLog('##################################################################################################\n\n',
          as.character(Sys.time()),'\n',
          'Imported and sanity checked meta data. Looking good so far!\n',
          'metadata:\n')
@@ -293,7 +304,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   catLog('\n timeSeries:\n')
   for ( ts in timeSeries )
     catLog('',ts, '\n', sep='   ')
-  catLog('\n#############################################################\n\n')
+  catLog('\n##################################################################################################\n\n')
 
   #compare coverage of samples to the pool of normals, using limma-voom.
   source('runDE.R')
@@ -317,7 +328,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
 
   #Plot volcanoes and output an excel file with top DE regions.
   source('makeFitPlots.R')
-  ret = try(makeFitPlots(fitS, plotDirectory,
+  ret = try(makeFitPlots(fitS, plotDirectory, genome,
     forceRedoVolcanoes=forceRedoVolcanoes, forceRedoDifferentRegions=forceRedoDifferentRegions))
   if ( class(ret) == 'try-error' ) {
     catLog('Error in makeFitPlots, will continue analysis anyway.')
@@ -406,7 +417,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   
   #do multi-sample heatmaps and frequency progression
   source('makeSNPprogressionPlots.R')
-  progression = try(makeSNPprogressionPlots(variants, timeSeries, plotDirectory, cpus=cpus, forceRedo=forceRedoSNPprogression))
+  progression = try(makeSNPprogressionPlots(variants, timeSeries, normals, plotDirectory, cpus=cpus, forceRedo=forceRedoSNPprogression))
   if ( class(progression) == 'try-error' ) {
     catLog('Error in makeSNPprogressionPlots! Continuing anyway, but these plots are kindof useful.\n')
     warning('Error in makeSNPprogressionPlots! Continuing anyway, but these plots are kindof useful.')
@@ -446,7 +457,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
 
   #combine SNPs and CNVs into stories of subclones.
   source('getStories.R')
-  stories = try(getStories(variants=variants, normalVariants=normalVariants, cnvs=cnvs, timeSeries=timeSeries, Rdirectory=Rdirectory,
+  stories = try(getStories(variants=variants, normalVariants=normalVariants, cnvs=cnvs, timeSeries=timeSeries, normals=normals, Rdirectory=Rdirectory,
     plotDirectory=plotDirectory, cpus=cpus, forceRedo=forceRedoStories))
   if ( class(stories) == 'try-error' ) {
     catLog('Error in getStories!\n')
@@ -457,7 +468,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   }
   
   source('makeRiverPlots.R')
-  river = try(makeRiverPlots(stories, variants, plotDirectory, forceRedo=forceRedoRiver))
+  river = try(makeRiverPlots(stories, variants, genome, plotDirectory, forceRedo=forceRedoRiver))
   if ( class(river) == 'try-error' ) {
     catLog('Error in makeRiverPlots!\n')
     warning('Error in makeRiverPlots!')
@@ -502,6 +513,7 @@ loadData = function(Rdirectory) {
 #' loadMethods()
 
 loadMethods = function() {
+  assign('catLog', function(...) cat(...), envir = .GlobalEnv)
   source('debug.R')
   source('importCaptureRegions.R')
   source('importSampleMetaData.R')

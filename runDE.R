@@ -150,13 +150,14 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   correctionFactor = list()
   GCdirectory = paste0(diagnosticPlotsDirectory, '/GCplots/')
   if ( !file.exists(GCdirectory) ) dir.create(GCdirectory)
-  for (col in colnames(counts)) {
+  for (i in 1:ncol(counts)) {
+    col = colnames(counts)[i]
     catLog(col, '..', sep='')
     lo = loess(cov~gc, data=data.frame(cov=log((1+counts[,col])/(annotation$Length)), gc=gc),
       weights=noneg(annotation$Length-100), span=0.3, family='symmetric', degrees=1)
     los = exp(predict(lo, gc))
-    correctionFactor[[col]] = pmin(10, pmax(0.1, (1/los)/mean(1/los)))
-    correctionFactor[[col]] = correctionFactor[[col]]*sum(counts[,col])/sum(counts[,col]*correctionFactor[[col]])
+    correctionFactor[[i]] = pmin(10, pmax(0.1, (1/los)/mean(1/los)))
+    correctionFactor[[i]] = correctionFactor[[i]]*sum(counts[,col])/sum(counts[,col]*correctionFactor[[i]])
     plotfile = paste0(GCdirectory, col, '.png')
     if ( !file.exists(plotfile) | forceRedoFit ) {
       png(plotfile, height=2000, width=4000, res=144)
@@ -169,7 +170,7 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   correctionFactor = do.call(cbind, correctionFactor)
   catLog('done.\n')
 
-  #MA plots after loess and GC correcrion
+  #MA plots after loess and GC correction
   diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
   if ( !file.exists(diagnosticPlotsDirectory) ) dir.create(diagnosticPlotsDirectory)
   catLog('Making MA plots of coverage after loess and GC correction in diagnostics directory..')

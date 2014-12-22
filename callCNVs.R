@@ -109,7 +109,7 @@ callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVarian
 #helper function that selects germline het SNPs in the presence of a normal sample from the same individual.
 selectGermlineHets = function(normalVariants, moreNormalVariants, minCoverage = 10, cpus=1) {
   #only bother with variants that have enough coverage so that we can actually see a change in frequency
-  if ( v == 'trackProgress' ) cat('Taking variants with minimum coverage of', minCoverage, '...')
+  catLog('Taking variants with minimum coverage of', minCoverage, '...')
   decentCoverage = normalVariants$cov >= minCoverage
   use = rownames(normalVariants)[decentCoverage]
   normalVariants = normalVariants[use,]
@@ -134,7 +134,7 @@ selectGermlineHets = function(normalVariants, moreNormalVariants, minCoverage = 
   if ( length(use) == 0 ) return(use)
 
   #keep only variants that are present in analysis of other normals
-  if ( v == 'trackProgress' ) cat('Taking variants that are analysed for all normals..')
+  catLog('Taking variants that are analysed for all normals..')
   use = Reduce(intersect, lapply(moreNormalVariants, rownames), rownames(normalVariants))
   moreNormalVariants = lapply(moreNormalVariants, function(vs) {
     is = rownames(vs) %in% use
@@ -159,7 +159,7 @@ selectGermlineHets = function(normalVariants, moreNormalVariants, minCoverage = 
   if ( length(use) == 0 ) return(use)
   
   #again to filter out noisy variants, require that all normals are conistent with ref, het or hom.
-  if ( v == 'trackProgress' ) cat('Taking variants that are ref, het or hom in all normals..')
+  catLog('Taking variants that are ref, het or hom in all normals..')
   consistent = rowSums(!(is0[use,,drop=F] | is1[use,,drop=F] | isHet[use,,drop=F])) == 0
   use = use[consistent]
   normalVariants = normalVariants[use,]
@@ -343,6 +343,7 @@ mergeRegions = function(cR, minScore = 0.05, plot=F, debug=F) {
 postProcess = function(clusters, cRs, freqs, genome='hg19') {
   clusters$f = refUnbias(clusters$var/clusters$cov)
   clusters = redoHetCalculations(clusters, freqs)
+  clusters = addCall(clusters, freqs)
   renorm =  normaliseCoverageToHets(clusters)
   clusters = renorm$clusters
   clusters = addCall(clusters, freqs)
@@ -352,7 +353,7 @@ postProcess = function(clusters, cRs, freqs, genome='hg19') {
   return(list(clusters=clusters, meanM=renorm$meanM))
 }
 
-#helper function that fixes the probability that a region has 50% frequency.
+#helper function that calculates the probability that a region has 50% frequency.
 redoHetCalculations = function(clusters, freqs) {
   x = freqs$x
   snps = lapply(1:nrow(clusters), function(row) which(x < clusters$x2[row] & x > clusters$x1[row]))
@@ -382,10 +383,11 @@ redoHetCalculations = function(clusters, freqs) {
 
 #remormalise the coverage so that the AB calls are average of 0.
 normaliseCoverageToHets = function(clusters) {
-  is = which(clusters$pHet > 0.05 & abs(clusters$M) < 0.3)
+  is = which(clusters$call == 'AB' & abs(clusters$M) < 0.3)
   if ( length(is) > 0 )
     meanM = sum((clusters$M/clusters$width^2)[is])/sum(1/clusters$width[is]^2)
   else meanM = 0
+  catLog('Shifting overall normalisation to correct for a mean LFC of', meanM, 'in AB calls.\n')
   clusters$M = clusters$M - meanM
   return(list(clusters=clusters, meanM=meanM))
 }
@@ -409,7 +411,8 @@ addCall = function(clusters, freqs) {
       for ( tryCall in allCalls() ) {
         iscnv = isCNV(clusters[row,], fs, log2(callTofM(tryCall)['M']), callTofM(tryCall)['f'], callPrior(tryCall),
           sigmaCut=max(3, clusters$sigma[row]))
-        if ( (iscnv$call & clusters$sigma[row] > 3) | (iscnv$call & iscnv$clonality > clusters$clonality[row]) ) {
+        if ( (iscnv$call & clusters$sigma[row] > 3) |
+            (iscnv$call & (iscnv$clonality > clusters$clonality[row] | (iscnv$clonality == clusters$clonality[row] & iscnv$sigma < clusters$sigma[row]))) ) {
           clusters$clonality[row] = iscnv$clonality
           clusters$clonalityError[row] = iscnv$clonalityError
           clusters$sigma[row] = iscnv$sigma

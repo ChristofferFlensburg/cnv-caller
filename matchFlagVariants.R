@@ -76,7 +76,7 @@ matchVariants = function(vs1, vs2) {
 }
 
 #helper function that flags variants that have suspicious behaviour in the pool of normals.
-flagFromNormals = function(variants, normalVariants, cpus=1) {  
+flagFromNormals = function(variants, normalVariants, cpus=1) {
   #check normals for recurring noise.
   setVariantLoss(normalVariants$variants)
   varN = do.call(cbind, lapply(normalVariants$variants, function(q) q$var))
@@ -96,6 +96,11 @@ flagFromNormals = function(variants, normalVariants, cpus=1) {
   normalNoise = (!db & non0 & pSameF > 0.01) | (db & non0 & pSameF > 0.01 & !consistent)
   catLog('Flagged', sum(normalNoise), 'out of', nrow(fs),
          'variants that are recurrently and consistently noisy in normals.\n')
+
+  present = fs > 0.2 & covN >= 10
+  variableNormal = !normalNoise & rowSums(present) > 0
+  catLog('Flagged another', sum(variableNormal), 'out of', nrow(fs),
+         'variants that are significantly present in at least on normal sample.\n')
   
   #check if the variants are consistent with the normal noise frequency, and flag Nnc or Nnn.
   variants$variants =
@@ -103,6 +108,8 @@ flagFromNormals = function(variants, normalVariants, cpus=1) {
         ps = pBinom(q$cov[normalNoise], q$var[normalNoise], f[normalNoise])
         flag = ifelse(ps > 0.01, 'Nnc', 'Nnn')        #normal noise (non)-consistent
         q$flag[normalNoise] = paste0(q$flag[normalNoise], flag)
+        vnFlag = ifelse(variableNormal, 'Vn', '')
+        q$flag = paste0(q$flag, vnFlag)
         return(q)
     })
 
@@ -135,36 +142,6 @@ markSomatics = function(variants, normalVariants, individuals, normals, cpus=cpu
   CNs = which(!is.na(correspondingNormal))
   names(CNs) = names(variants$variants[CNs])
 
-  #calculate and assign somatic p-values for the cancer samples
-  #use the newVariant p-values
-  for ( name in names(CNs) ) {
-    catLog('Marking somatic mutations in ', name, ' using matching normal ', correspondingNormal[name], '..', sep='')
-    q1 = variants$variants[[correspondingNormal[name]]]
-    q2 = variants$variants[[name]]
-    use = !q2$db & q2$flag == ''
-    q1 = q1[use,]
-    q2 = q2[use,]
-    freq1 = q1$var/q1$cov
-    freq1[is.na(freq1)] = -0.02
-    freq2 = q2$var/q2$cov
-    freq2[is.na(freq2)] = -0.02
-  
-    require(parallel)
-    ps = unlist(mclapply(1:length(freq1), function(i) fisher.test(matrix(c(q1$ref[i], q1$var[i], q2$ref[i], q2$var[i]), nrow=2))$p.value, mc.cores=cpus))
-  
-    low = (freq1 < 0.2 | (pBinom(q1$cov, q1$var, 0.3) < 0.01 & freq1 < 0.3)) & !(freq1 == 0 & freq2 == 0)
-    fdr = p.adjust(ps, method='fdr')
-    fdr[low] = p.adjust(ps[low], method='fdr')
-    normalOK = which(freq1 < freq2 & low)
-    fdr[!normalOK] = 1
-    pSampleOK = p.adjust(q2$pbq, method='fdr')*p.adjust(q2$pmq, method='fdr')*p.adjust(q2$psr, method='fdr')
-    pZero = p.adjust(dbinom(q2$var, q2$cov, 0.001), method='fdr')   #the base quality cut on 30 correpsonds to 0.001 wrong base calls.
-    
-    variants$variants[[name]]$somaticP = 0
-    variants$variants[[name]]$somaticP[use] = (1-fdr)*pSampleOK*(1-pZero)
-    catLog('got roughly ', sum(variants$variants[[name]]$somaticP > 0.5), ' somatic variants.\n', sep='')
-  }
-
   #require consistent and very low frequency between normals.
   varN = do.call(cbind, lapply(normalVariants$variants, function(q) q$var))
   covN = do.call(cbind, lapply(normalVariants$variants, function(q) q$cov))
@@ -182,8 +159,8 @@ markSomatics = function(variants, normalVariants, individuals, normals, cpus=cpu
   polymorphicFrequency = 1-(1-observedPolymorphic/basePairs)^(1/nNormals)
   
   #calculate somatic p-values for the rest of the samples
-  for ( name in names[!(names %in% CNs)] ) {
-    catLog('Marking somatic mutations in ', name, ' using pool of normals..', sep='')
+  for ( name in names ) {
+    catLog('Marking somatic mutations in ', name, '..', sep='')
     q = variants$variants[[name]]
     #Require non-db SNP, and no flag
     use = !q$db & q$flag == ''
@@ -200,6 +177,11 @@ markSomatics = function(variants, normalVariants, individuals, normals, cpus=cpu
     pPolymorphic = 1/(1+nrow(q)/(polymorphicFrequency*basePairs))
     pNormalFreq = pBinom(q$cov, q$var, normalFreq)
     normalOK = normalFreq < 0.01 & normalFreq < freq
+    if ( name %in% names(CNs) ) {
+      cat('Correcting somatics using matched normal.\n')
+      qn = variants$variants[[correspondingNormal[name]]][use,]
+      normalOK = normalOK & (qn$cov == 0 | qn$var/qn$cov < 0.05) & qn$flag == ''
+    }
     pSampleOK = p.adjust(q$pbq, method='fdr')*p.adjust(q$pmq, method='fdr')*p.adjust(q$psr, method='fdr')
     pZero = p.adjust(dbinom(q$var, q$cov, 0.01), method='fdr')   #the base quality cut on 30 correpsonds to 0.001 wrong base calls.
 
@@ -280,7 +262,7 @@ setVariantLoss = function(variants, maxLoops = 99) {
     if ( sum(use) == 0 ) {
       observedMean = 0.5
       warning('Ran out of het SNPs after', loops, 'iterations. Will not cancel reference bias.')
-      assign('.variantLoss', 0.5, envir = .GlobalEnv)
+      assign('.variantLoss', 0, envir = .GlobalEnv)
       break
     }
     passedVariants = observedMean/(1-observedMean)
@@ -293,9 +275,14 @@ setVariantLoss = function(variants, maxLoops = 99) {
     assign('.variantLoss', vL, envir = .GlobalEnv)
     if ( loops > maxLoops ) {
       warning('Iterated to find variant loss', loops, 'times without converging. Will not cancel reference bias. This may affect the quality of CNV calls.')
-      assign('.variantLoss', 0.5, envir = .GlobalEnv)
+      assign('.variantLoss', 0, envir = .GlobalEnv)
       break
     }
+  }
+  if ( .variantLoss > 0.25 ) {
+    warning('Variant loss estimated to above 25%, which is suspiciously high. Will not correct for reference bias.\n')
+    catLog('Variant loss estimated to above 25%, which is suspiciously high. Will not correct for reference bias.\n')
+    assign('.variantLoss', 0, envir = .GlobalEnv)
   }
   return(.variantLoss)
 }

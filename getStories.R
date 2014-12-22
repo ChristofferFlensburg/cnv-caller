@@ -1,7 +1,7 @@
 
 #summarises somatic SNVs and CNV calls into subclone evolution over samples
 #and determines which subclones are subclones of which other subclones.
-getStories = function(variants, normalVariants, cnvs, timeSeries, Rdirectory, plotDirectory, cpus=1, forceRedo=F) {
+getStories = function(variants, normalVariants, cnvs, timeSeries, normals, Rdirectory, plotDirectory, cpus=1, forceRedo=F) {
   setVariantLoss(normalVariants$variants)
   stories = list()
   if ( length(timeSeries) == 0 ) return(stories)
@@ -24,12 +24,12 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, Rdirectory, pl
 
     #set clonality of SNPs from frequency and local CNV, return stories
     catLog('SNVs..\n')
-    snpStories = findSNPstories(somaticQs, cnvs[ts])
+    snpStories = findSNPstories(somaticQs, cnvs[ts], normals[ts])
     catLog('Keeping', nrow(snpStories), 'SNV stories.\n')
 
     #combine CNV calls over sample into stories
-    catLog('Tracking clonal evolution in CNVs..\n')
-    cnvStories = getCNVstories(cnvs[ts])
+    catLog('Tracking clonal evolution in CNVs..')
+    cnvStories = getCNVstories(cnvs[ts], normals[ts])
     catLog('Keeping', nrow(cnvStories), 'CNV stories.\n')
 
     #cluster stories for SNPs, CNVs, both.
@@ -42,6 +42,7 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, Rdirectory, pl
     allStories$errors = as.matrix(rbind(snpStories$errors, cnvStories$errors))
     rownames(allStories$stories) = rownames(allStories$errors) = rownames(allStories)
     clusteredStories = storiesToCloneStories(allStories, variants$SNPs, plotProgress=F, plot=F)
+
     
     #combine the clustered stories into clonal evolution (figure out which is subclone of which)
     catLog('decide subclone structure..')
@@ -57,7 +58,7 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, Rdirectory, pl
   return(stories)
 }
 
-findSNPstories = function(somaticQs, cnvs) {
+findSNPstories = function(somaticQs, cnvs, normal) {
   cov10 = rowMeans(do.call(cbind, lapply(somaticQs, function(q) q$cov))) >= 10
   somaticQs = lapply(somaticQs, function(q) q[cov10,])
   somaticQs = findSNPclonalities(somaticQs, cnvs)
@@ -67,12 +68,18 @@ findSNPstories = function(somaticQs, cnvs) {
   ret$stories = clonality
   ret$errors = clonalityError
 
-  allSmall = rowSums(abs(ret$stories) < ret$errors*2 | is.na(ret$errors) |ret$stories - ret$errors < 0.3) == ncol(ret$stories)
+  allSmall = rowSums(is.na(ret$errors) | ret$stories - ret$errors < 0.3 | ret$errors > 0.2) == ncol(ret$stories)
   ret = ret[!allSmall,]
-  uncertain = rowMeans(ret$errors) > 0.25
+  uncertain = rowMeans(ret$errors) > 0.2
   ret = ret[!uncertain,]
-  catLog('Filtered ', sum(allSmall) , ' small and ', sum(uncertain), ' uncertain stories.\n', sep='')
+  if ( any(normal) ) {
+    notNormal = ret$stories[,normal] > 0.05
+    ret = ret[!notNormal,]
+    catLog('Filtered ', sum(allSmall) , ' small, ', sum(uncertain), ' uncertain and ', sum(notNormal), ' present in normal stories.\n', sep='')
+  }
+  else catLog('Filtered ', sum(allSmall) , ' small and ', sum(uncertain), ' uncertain stories.\n', sep='')
 
+  colnames(ret$stories) = colnames(ret$errors) = names(somaticQs)
   return(ret)
 }
 
@@ -135,8 +142,8 @@ findSNPclonalities = function(somaticQs, cnvs) {
     #clonalityError[f==0] = fErr[f==0]
 
     q$homeAllele = homeAllele
-    q$clonality = clonality
-    q$clonalityError = clonalityError
+    q$clonality = noneg(clonality)
+    q$clonalityError = abs(clonalityError)
     return(q)
     })
   return(somaticQs)
@@ -198,10 +205,12 @@ frequencyError = function(var, cov, p0=0.15) {
   return(error)
 }
 
-getCNVstories = function(cnvs) {
+getCNVstories = function(cnvs, normal) {
   regions = splitRegions(cnvs)
+  catLog(nrow(regions), ' regions..', sep='')
   events = splitEvents(cnvs, regions)
-  stories = cnvsToStories(cnvs, events)
+  catLog(nrow(regions), ' events.\nExtracting stories..', sep='')
+  stories = cnvsToStories(cnvs, events, normal)
   return(stories)
 }
 
@@ -232,7 +241,7 @@ splitEvents = function(cnvs, regions) {
   return(events)
 }
 
-cnvsToStories = function(cnvs, events) {
+cnvsToStories = function(cnvs, events, normal) {
   stories = errors = data.frame()
   if ( nrow(events) > 0 ) {
     i=1
@@ -266,13 +275,18 @@ cnvsToStories = function(cnvs, events) {
   ret$errors = as.matrix(errors)
   ret$errors[is.na(ret$errors)] = 1
 
-  allSmall = rowSums(ret$stories - ret$errors < 0.3) == ncol(ret$stories)
+  allSmall = rowSums(ret$stories - ret$errors < 0.3 | ret$errors > 0.2) == ncol(ret$stories)
   ret = ret[!allSmall,]
-  uncertain = rowMeans(ret$errors) > 0.4
+  uncertain = rowMeans(ret$errors) > 0.2
   ret = ret[!uncertain,]
   notSignificant = rowSums(abs(ret$stories) < ret$errors*1.5 | is.na(ret$errors)) >= ncol(ret$stories)
   ret = ret[!notSignificant,]
-  catLog('Filtered ', sum(allSmall) , ' all small, ', sum(uncertain), ' uncertain and ', sum(notSignificant), ' notsignificant stories.\n', sep='')
+  if ( any(normal) ) {
+    notNormal = ret$stories[,normal] > ret$errors[,normal]+0.05
+    ret = ret[!notNormal,]
+    catLog('Filtered ', sum(allSmall) , ' small, ', sum(uncertain), ' uncertain and ', sum(notNormal), ' present in normal stories.\n', sep='')
+  }
+  else catLog('Filtered ', sum(allSmall) , ' small and ', sum(uncertain), ' uncertain stories.\n', sep='')
   return(ret)
 }
 
