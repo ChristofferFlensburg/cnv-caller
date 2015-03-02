@@ -67,7 +67,7 @@ makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, ge
 
 #helper function that generates fancy scatter plots of the frequencies of two samples.
 #Requires two variants objects, and a SNPs object.
-qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCov=10, main='', xlab='variant frequency: sample1', ylab='variant frequency: sample2', plotFlagged=T, cpus=1, verbose=T, print = F, printRedCut = 0.99, printOnlyNovel=F, plotPosition=F, genome='hg19', xlim=c(0,1), ylim=c(0,1), outputHighlighted=F) {
+qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCov=10, main='', xlab='variant frequency: sample1', ylab='variant frequency: sample2', plotFlagged=T, cpus=1, verbose=T, print = F, printRedCut = 0.99, printOnlyNovel=F, plotPosition=F, genome='hg19', xlim=c(0,1), ylim=c(0,1), outputHighlighted=F, frame.plot=F, legend=T, redCut=0.75, ...) {
   use = q1$var > 0 | q2$var > 0
   q1 = q1[use,]
   q2 = q2[use,]
@@ -126,30 +126,37 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
   }
   dof = max(20, sum(clean & freq1+freq2 > 0 & freq1+freq2 < 2))
   if ( verbose ) catLog('MHC done with effective dof', dof, '\n')
-  red = pmin(1, pmax(0, (-log10(ps)/log10(dof) - 0.75)))
+  red = pmin(1, pmax(0, (-log10(ps)/log10(dof) - redCut)))
 
-  covScale = 100
-  maxSize = 1.5
-  covCut = 10
-  use = q1$cov >= covCut & q2$cov >= covCut
+  use = q1$cov >= minCov & q2$cov >= minCov
   if ( sum(use) == 0 ) invisible(ps)
   cleanOrder = which(clean&use)[order((red-0.1*db)[clean&use])]
   col = rep('black', length(red))
   col[!clean&use] = rgb(0.6 + red[!clean&use]*0.4, 0.6+red[!clean&use]*0.2, 0.6)
   col[clean&use] = rgb(red,0,ifelse(db, 0,(1-red)))[clean&use]
-  cex = pmin(maxSize, sqrt(sqrt(q1$cov*q2$cov)/covScale))
-  pch = ifelse(clean, ifelse(db, 4, 19), ifelse(db, 4, 1))
-  plot(1, type='n', xlim=xlim, ylim=ylim, xlab = xlab, ylab = ylab, main=main)
+  cex = pmin(maxCex, sqrt(sqrt(q1$cov*q2$cov)/covScale))
+  if ( 'germline' %in% names(q1) ) pch = ifelse(clean, ifelse(db, 4, ifelse(q1$germline & !is.na(q1$germline), 3, 19)), ifelse(db, 4, 1))
+  else pch = ifelse(clean, ifelse(db, 4, 19), ifelse(db, 4, 1))
+  plot(1, type='n', xlim=xlim, ylim=ylim, xlab = xlab, ylab = ylab, main=main, frame.plot=frame.plot, ...)
   segments(c(0,1,0,0,0, 0.5, 0), c(0,0, 0,1,0, 0, 0.5), c(0, 1, 1, 1, 1, 0.5, 1), c(1, 1, 0, 1, 1, 1, 0.5), col = rgb(0.8, 0.8, 0.8), lwd=0.3)
   if ( !plotPosition ) {
-    if ( plotFlagged )
-      legend('bottomright', c('clean non-db', 'flagged non-db', 'clean db', 'flagged db', 'significantly different', 'high coverage', 'low coverage'), pch=c(19, 1, 4, 4, 19, 19, 19), col=c('blue', 'grey', 'black', 'grey', 'red', 'black', 'black'), pt.cex=c(1,1,1,1,1,1,0.3))
-    else
-      legend('bottomright', c('not in dbSNP', 'in dbSNP', 'significantly different', 'low coverage'), pch=c(19, 4, 19, 19), col=c('blue', 'black', 'red', 'black'), pt.cex=c(1,1,1,0.3))
+    if ( legend ) {
+      if ( plotFlagged )
+        legend('bottomright', c('clean non-db', 'flagged non-db', 'clean germline-like non-db', 'clean db', 'flagged db', 'significantly different', 'high coverage', 'low coverage', 'severe effect'), pch=c(19, 1, 3, 4, 4, 19, 19, 19, 1), col=c('blue', 'grey', 'blue', 'black', 'grey', 'red', 'black', 'black', 'orange'), pt.cex=c(1,1,1,1,1,1,1,0.3, 1.5), bg='white')
+      else
+        legend('bottomright', c('not in dbSNP', 'in dbSNP', 'germline-like non-db', 'significantly different', 'low coverage', 'severe effect'), pch=c(19, 4, 3, 19, 19, 1), col=c('blue', 'black', 'blue', 'red', 'black', 'orange'), pt.cex=c(1,1,1,1,0.3, 1.5), bg='white')
+    }
     points(freq1[!clean&use], freq2[!clean&use], cex=cex[!clean&use],
-           lwd=pmin(maxSize, sqrt(sqrt(q1$cov*q2$cov)[!clean&use]/covScale)), pch=pch[!clean&use], col=col[!clean&use])
+           lwd=pmin(maxCex, sqrt(sqrt(q1$cov*q2$cov)[!clean&use]/covScale)), pch=pch[!clean&use], col=col[!clean&use])
     points(freq1[cleanOrder], freq2[cleanOrder], cex=cex[cleanOrder],
-           lwd=pmin(maxSize, sqrt(sqrt(q1$cov*q2$cov)[cleanOrder]/covScale)), pch=pch[cleanOrder], col=col[cleanOrder])
+           lwd=pmin(maxCex, sqrt(sqrt(q1$cov*q2$cov)[cleanOrder]/covScale)), pch=pch[cleanOrder], col=col[cleanOrder])
+  }
+
+  if ( 'severity' %in% names(q1) & 'severity' %in% names(q2) ) {
+    severity = pmin(q1$severity, q2$severity)
+    severe = clean & use & severity <= 6 & !db
+    points(freq1[severe], freq2[severe], cex=cex[severe]+(8-severity[severe])/10,
+           lwd=(8-severity[severe])/2, pch=1, col='orange')
   }
   
   if ( plotPosition ) {

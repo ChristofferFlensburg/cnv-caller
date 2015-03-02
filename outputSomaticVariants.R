@@ -2,7 +2,7 @@ require(WriteXLS)
 
 
 #prints the somatic variants to an excel sheet.
-outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, forceRedo=forceRedoOutputSomatic) {
+outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, runVEP=T, forceRedo=forceRedoOutputSomatic) {
   outfile = paste0(plotDirectory, '/somaticVariants.xls')
   if ( (!file.exists(outfile) | forceRedo) ) {
     somatics = list()
@@ -15,13 +15,30 @@ outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, for
       toReturn = toReturn[order(somaticP[toReturn], decreasing=T)]
       q = q[toReturn,]
       SNPs = variants$SNPs[variants$SNPs$x %in% q$x,]
+
+      end = xToPos(q$x, genome)
+      variant = q$variant
+      reference = q$reference
+      if ( any(grepl('-', variant)) ) {
+        nDel = as.numeric(gsub('-', '', variant[grepl('-', variant)]))
+        reference[grepl('-', variant)] = paste0(reference[grepl('-', variant)], sapply(nDel, function(n) do.call(paste0, as.list(rep('N', n)))))
+        variant[grepl('-', variant)] = '-'
+        end[grepl('-', variant)] = end[grepl('-', variant)]+nDel
+      }
+      if ( any(grepl('\\+', variant)) ) {
+        nIns = nchar(variant[grepl('\\+', variant)])-1
+        variant[grepl('\\+', variant)] = paste0(reference[grepl('\\+', variant)], gsub('\\+', '', variant[grepl('\\+', variant)]))
+      }
+      
       somatic = data.frame(
         chr=xToChr(q$x, genome),
         start=xToPos(q$x, genome),
-        end=xToPos(q$x, genome),
-        reference=q$reference,
-        variant=q$variant,
+        end=end,
+        reference=reference,
+        variant=variant,
         inGene=SNPs[as.character(q$x),]$inGene,
+        severity=if ( 'severity' %in% names(q) ) q$severity else rep('na', nrow(q)),
+        effect=if ( 'type' %in% names(q) ) q$type else rep('notChecked', nrow(q)),
         f=q$var/q$cov,
         cov=q$cov,
         ref=q$ref,
@@ -31,10 +48,34 @@ outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, for
         pmq=q$pmq,
         psr=q$psr,
         somaticP=q$somaticP,
+        germlineLike=ifelse(is.na(q$germline), 'na', ifelse(q$germline, 'YES', '')),
         row.names=rownames(q))
+      if ( 'severity' %in% names(q) ) ord = order(q$severity + 10*q$germline)
+      else ord = order(10*q$germline)
+      somatic = somatic[ord,]
       somatics[[sample]] = somatic
     }
     WriteXLS('somatics', outfile)
     catLog('done!\n')
+
+    vcfDir = paste0(plotDirectory, '/somatics')
+    if ( !file.exists(vcfDir) ) dir.create(vcfDir)
+    catLog('Outputting to directory ', vcfDir, '..')
+    for ( name in names(somatics) ) {
+      somatic = somatics[[name]]
+      somatic = somatic[somatic$somaticP > 0.5,]
+      outfile = paste0(vcfDir, '/', name, '.txt')
+      catLog(basename(outfile), '..', sep='')
+      if ( nrow(somatic) > 0 ) {
+        mx = cbind(as.character(somatic$chr),
+          as.character(somatic$start), as.character(somatic$end),
+          paste0(as.character(somatic$reference), '/', as.character(somatic$variant)),
+          rep('+', nrow(somatic)), as.character(1:nrow(somatic)))
+        write(t(mx), file=outfile, sep='\t', ncolumns=ncol(mx))        
+      }
+      else
+        write('No somatic mutations detected.', file=outfile, sep='\t')
+    }
+    catLog('done.\n')
   }
 }

@@ -12,6 +12,8 @@ matchFlagVariants = function(variants, normalVariants, individuals, normals, Rdi
     setVariantLoss(allVariants$normalVariants$variants)
     return(allVariants)
   }
+  variants$variants = lapply(variants$variants, function(q) q[apply(!is.na(q), 1, any),])
+  normalVariants$variants = lapply(normalVariants$variants, function(q) q[apply(!is.na(q), 1, any),])
   variants = matchVariants(variants, normalVariants)
   normalVariants = matchVariants(normalVariants, variants)
 
@@ -81,6 +83,8 @@ flagFromNormals = function(variants, normalVariants, cpus=1) {
   setVariantLoss(normalVariants$variants)
   varN = do.call(cbind, lapply(normalVariants$variants, function(q) q$var))
   covN = do.call(cbind, lapply(normalVariants$variants, function(q) q$cov))
+  flags = do.call(cbind, lapply(normalVariants$variants, function(q) q$flag))
+  unflagged = rowSums(flags == '') == ncol(flags)
   db = normalVariants$variants[[1]]$db
   f = rowSums(varN)/rowSums(covN)
   f[rowSums(covN) == 0] = 0
@@ -98,9 +102,14 @@ flagFromNormals = function(variants, normalVariants, cpus=1) {
          'variants that are recurrently and consistently noisy in normals.\n')
 
   present = fs > 0.2 & covN >= 10
-  variableNormal = !normalNoise & rowSums(present) > 0
+  variableNormal = (!normalNoise & rowSums(present) > 0 & !db) | (!normalNoise & non0 & !consistent & db)
   catLog('Flagged another', sum(variableNormal), 'out of', nrow(fs),
-         'variants that are significantly present in at least on normal sample.\n')
+         'variants that are not db, but significantly present in at least on normal sample.\n')
+
+  meanCov = rowmeans(covN)
+  manyCopies = meanCov > 10*median(meanCov[unflagged])
+  catLog('Flagged another', sum(manyCopies), 'out of', nrow(fs),
+         'variants that are have a coverage ten times higher than median.\n')
   
   #check if the variants are consistent with the normal noise frequency, and flag Nnc or Nnn.
   variants$variants =
@@ -110,6 +119,8 @@ flagFromNormals = function(variants, normalVariants, cpus=1) {
         q$flag[normalNoise] = paste0(q$flag[normalNoise], flag)
         vnFlag = ifelse(variableNormal, 'Vn', '')
         q$flag = paste0(q$flag, vnFlag)
+        McFlag = ifelse(manyCopies, 'Mc', '')
+        q$flag = paste0(q$flag, McFlag)
         return(q)
     })
 
@@ -129,6 +140,17 @@ flagFromNormals = function(variants, normalVariants, cpus=1) {
       q$flag[polymorphic] = paste0(q$flag[polymorphic], 'Pn')  #polymorphic Normal
       return(q)
     })
+
+  catLog('Flagging SNPs that are in noisy regions. New flags by sample:')
+  variants$variants =
+    lapply(variants$variants, function(q) {
+      flagX = q$x[q$flag != '' & q$flag != 'Nr']
+      inNoisyRegion = unlist(mclapply(q$x, function(x) sum(abs(flagX - x) < 100) >= 10 | sum(abs(flagX - x) < 200) >= 20 | sum(abs(flagX - x) < 300) >= 30 | sum(abs(flagX - x) < 1000) >= 50, mc.cores=cpus))
+      catLog(' ', sum(inNoisyRegion & q$flag == ''), sep='')
+      q$flag[inNoisyRegion] = paste0(q$flag[inNoisyRegion], 'Nr')
+      return(q)
+    })
+  catLog(' done.\n')
   
   return(variants)
 }
@@ -242,12 +264,12 @@ fisherTest = function(p) {
   return(c(Xsq = Xsq, pVal = pVal))
 }
 
-setVariantLoss = function(variants, maxLoops = 99) {
+setVariantLoss = function(variants, maxLoops = 99, verbose=T) {
   #if called with several samples, take average
   if ( class(variants) == 'list' ) {
-    vL = mean(unlist(lapply(variants, function(var) setVariantLoss(var, maxLoops=maxLoops))))
+    vL = mean(unlist(lapply(variants, function(var) setVariantLoss(var, maxLoops=maxLoops, verbose=F))))
     assign('.variantLoss', vL, envir = .GlobalEnv)
-    catLog('Average variant loss is', vL, '\n')
+    if ( verbose ) catLog('Average variant loss is', vL, '\n')
     return(.variantLoss)
   }
 
@@ -261,14 +283,13 @@ setVariantLoss = function(variants, maxLoops = 99) {
     observedMean = sum(variants$var[use])/sum(variants$cov[use])
     if ( sum(use) == 0 ) {
       observedMean = 0.5
-      warning('Ran out of het SNPs after', loops, 'iterations. Will not cancel reference bias.')
       assign('.variantLoss', 0, envir = .GlobalEnv)
       break
     }
     passedVariants = observedMean/(1-observedMean)
     vL = 1 - passedVariants
     if ( vL - variantLoss() < 0.00001 ) {
-      catLog('Variant loss converged to', vL, 'after', loops, 'iterations.\n')
+      if ( verbose ) catLog('Variant loss converged to', vL, 'after', loops, 'iterations.\n')
       assign('.variantLoss', vL, envir = .GlobalEnv)
       break
     }
@@ -281,7 +302,7 @@ setVariantLoss = function(variants, maxLoops = 99) {
   }
   if ( .variantLoss > 0.25 ) {
     warning('Variant loss estimated to above 25%, which is suspiciously high. Will not correct for reference bias.\n')
-    catLog('Variant loss estimated to above 25%, which is suspiciously high. Will not correct for reference bias.\n')
+    if ( verbose ) catLog('Variant loss estimated to above 25%, which is suspiciously high. Will not correct for reference bias.\n')
     assign('.variantLoss', 0, envir = .GlobalEnv)
   }
   return(.variantLoss)

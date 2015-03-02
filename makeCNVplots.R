@@ -6,42 +6,42 @@ makeCNVplots = function(cnvs, plotDirectory, genome='hg19', forceRedoCNVplots=F)
   for ( name in names(cnvs) ) {
     dirname = paste0(CNVplotDirectory, name)
     if ( !file.exists(dirname) ) dir.create(dirname)
-    catLog('Plotting CNVs to ', dirname, '.\n', sep='')
 
     #plot individual capture regions
-    filename = paste0(dirname, '/captureRegions.jpg')
+    filename = paste0(dirname, '/captureRegions.png')
     if ( !file.exists(filename) | forceRedoCNVplots ) {
-      jpeg(filename, width=20, height=10, res=300, units='in')
+      catLog('Plotting CNVs to ', dirname, '.\n', sep='')
+      png(filename, width=20, height=10, res=300, units='in')
       plotCR(cnvs[[name]]$CR, errorBars=F, genome=genome)
       dev.off()
     }
 
     #plot merged regions
-    filename = paste0(dirname, '/CNVcalls.jpg')
+    filename = paste0(dirname, '/CNVcalls.png')
     if ( !file.exists(filename) | forceRedoCNVplots ) {
-      jpeg(filename, width=20, height=10, res=300, units='in')
+      png(filename, width=20, height=10, res=300, units='in')
       plotCR(cnvs[[name]]$clusters, genome=genome)
       dev.off()
     }
 
     #plot both
-    filename = paste0(dirname, '/combined.jpg')
+    filename = paste0(dirname, '/combined.png')
     if ( !file.exists(filename) | forceRedoCNVplots ) {
-      jpeg(filename, width=20, height=10, res=300, units='in')
+      png(filename, width=20, height=10, res=300, units='in')
         plotCR(cnvs[[name]]$clusters, errorBars=F, genome=genome, alpha=0)
-        plotCR(cnvs[[name]]$CR, errorBars=F, genome=genome, alpha=0.1, add=T)
+        plotCR(cnvs[[name]]$CR, errorBars=F, genome=genome, alpha=0.1, add=T, moveHet=F)
         plotCR(cnvs[[name]]$clusters, errorBars=T, genome=genome, add=T)
       dev.off()
     }
-    outerFilename = paste0(CNVplotDirectory, '/', name, '.jpg')
+    outerFilename = paste0(CNVplotDirectory, '/', name, '.png')
     if ( !file.exists(outerFilename) | forceRedoCNVplots ) {
       system(paste0('cp ', gsub(' ', '\\\\ ',filename), ' ', gsub(' ', '\\\\ ',outerFilename)), intern=T)
     }
 
     for( chr in names(chrLengths(genome)) ) {
-      filename = paste0(dirname, '/chr', chr, '.jpg')
+      filename = paste0(dirname, '/chr', chr, '.png')
       if ( !file.exists(filename) | forceRedoCNVplots ) {
-        jpeg(filename, width=20, height=10, res=300, units='in')
+        png(filename, width=20, height=10, res=300, units='in')
         plotCR(cnvs[[name]]$clusters, errorBars=F, genome=genome, chr=chr, alpha=0)
         plotCR(cnvs[[name]]$CR, errorBars=F, genome=genome, chr=chr, alpha=0.3, add=T)
         plotCR(cnvs[[name]]$clusters, errorBars=T, genome=genome, chr=chr, add=T)
@@ -56,7 +56,7 @@ makeCNVplots = function(cnvs, plotDirectory, genome='hg19', forceRedoCNVplots=F)
 
 
 #The plotting function for CNV calls.
-plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', alpha=1, add=F, ...) {
+plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', alpha=1, add=F, moveHet=T, pt.cex=1, ...) {
   showClonality = showClonality & 'subclonality' %in% names(cR)
   if ( nrow(cR) == 0 ) return()
   if ( chr != 'all' ) {
@@ -81,7 +81,7 @@ plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', al
              col=c(rgb(0,0,0,0.3), rgb(0,0.8,0,0.3), rgb(1,0.5,0,0.3), rgb(1,0,0,0.3),
                rgb(0,0.8,0,0.3), rgb(1,0.5,0,0.3), rgb(1,0,0,0.3), rgb(0,0,0, 0.3)))
     text(xlim[2] + (xlim[2]-xlim[1])*0.005, c(0.1,0.6,0.6+log2(1.5)/2,1.1, -0.1,-1.1+2/3, -0.6, -1.1),
-         c('A', 'AB', 'ABB', 'ABBB', 'AB', 'ABB', 'ABBB', 'A'), adj=0, cex=0.7,
+         c('1 chr', '2 chr', '3 chr', '4 chr', '50%', '33%', '25%', '0%'), adj=0, cex=0.7,
          col=c(rgb(0,0,0,0.3), rgb(0,0.8,0,0.3), rgb(1,0.5,0,0.3), rgb(1,0,0,0.3),
            rgb(0,0.8,0,0.3), rgb(1,0.5,0,0.3), rgb(1,0,0,0.3), rgb(0,0,0, 0.3)))
     text(xlimMar[1] - (xlimMar[2]-xlimMar[1])*0.032, 0.6, srt=90, 'LFC coverage', cex=0.8)
@@ -97,10 +97,11 @@ plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', al
   x = (cR$x1 + cR$x2)/2
   y = 0.6+cR$M/2
   col = rgb(pmin(1,pmax(0,-2*cR$M)),0,pmin(1,pmax(0,2*cR$M)), alpha)
-  lwd = sqrt(0.05/cR$width)
-  points(x, pmax(0, y), cex=lwd, col=col, pch=16)
-  if ( errorBars ) segments(x, pmax(0,y-cR$width/2), x, pmax(0, y+cR$width/2), lwd=lwd, col=col)
-  segments(cR$x1, pmax(0,y), cR$x2, pmax(0, y), lwd=lwd, col=col)
+  width = sqrt(cR$width^2+systematicVariance()^2)
+  lfcCex = pt.cex*pmax(0.2, pmin(3, sqrt(0.1/width)))
+  points(x, pmax(0, y), cex=lfcCex, col=col, pch=16)
+  if ( errorBars ) segments(x, pmax(0,y-width/2), x, pmax(0, y+width/2), lwd=lfcCex, col=col)
+  segments(cR$x1, pmax(0,y), cR$x2, pmax(0, y), lwd=lfcCex, col=col)
   tooHigh = y > 1.2
   tooLow = y < 0
   if ( any(tooHigh) ) {
@@ -117,21 +118,30 @@ plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', al
   f = refUnbias(cRf$var/cRf$cov)
   if ( 'f' %in% colnames(cR) ) f = cR$f[cR$cov > 0]
   yf = -1.1 + 2*f
-  ferr = 2*sqrt(cRf$var)/cRf$cov
-  cex = pmax(0.2, pmin(3, sqrt(cRf$var/100)))
+  if ( 'ferr' %in% names(cR) ) ferr = cR$ferr
+  else ferr = 2*sqrt(cRf$var)/cRf$cov
+  fCex = pt.cex*pmax(0.2, pmin(3, sqrt(0.025/ferr)))
   #plot the average MAFs, opaqueness from how likely a non-het is.
   pHet = cRf$pHet
-  if ( 'call' %in% colnames(cRf) ) pHet[cRf$call == 'AB'] = 1
-  col = rgb(pmax(0,pmin(1, 4*(0.5-f))),0,0, (1-pHet)*alpha)
-  points(xf, yf, cex=cex, pch=16, col=col)
-  if ( errorBars ) segments(xf, pmin(-0.1, yf+ferr), xf, pmax(-1.1, yf-ferr), col=col, lwd=cex)
-  segments(cRf$x1, yf, cRf$x2, yf, lwd=cex, col=col)
+  if ( 'postHet' %in% colnames(cRf) ) pHet = cRf$postHet
+  if ( 'stat' %in% colnames(cRf) ) pHet[cRf$stat > 0] = 1
+  if ( 'call' %in% colnames(cRf) ) {
+    pHet = rep(0, length(pHet))
+    pHet[cRf$call %in% c('AB', 'CL', 'AABB')] = 1
+  }
+  if ( moveHet ) col = rgb(pmax(0,pmin(1, 4*(0.5-f))),0,0, (1-pHet)*alpha)
+  else col = rgb(pmax(0,pmin(1, 4*(0.5-f))),0,0, alpha)
+  points(xf, yf, cex=fCex, pch=16, col=col)
+  if ( errorBars ) segments(xf, pmin(-0.1, yf+ferr), xf, pmax(-1.1, yf-ferr), col=col, lwd=fCex)
+  segments(cRf$x1, yf, cRf$x2, yf, lwd=fCex, col=col)
   #plot f=0.5, opaqueness from how likely a het is.
-  col = rgb(0,0,0, pHet*alpha)
-  yf = rep(-0.1, length(xf))
-  points(xf, yf, cex=cex, pch=16, col=col)
-  if ( errorBars ) segments(xf, pmin(-0.1, yf+ferr), xf, pmax(-1.1, yf-ferr), col=col, lwd=cex)
-  segments(cRf$x1, yf, cRf$x2, yf, lwd=cex, col=col)
+  if ( moveHet ) {
+    col = rgb(0,0,0, pHet*alpha)
+    yf = rep(-0.1, length(xf))
+    points(xf, yf, cex=fCex, pch=16, col=col)
+    if ( errorBars ) segments(xf, pmin(-0.1, yf+ferr), xf, pmax(-1.1, yf-ferr), col=col, lwd=fCex)
+  }
+  segments(cRf$x1, yf, cRf$x2, yf, lwd=fCex, col=col)
 
   if ( 'call' %in% colnames(cR) ) {
     called = which(cR$call != 'AB')
@@ -157,9 +167,10 @@ plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', al
          col=subcloneColBG, border=F)
     y = -2.3 + cR$clonality
     error = cR$clonalityError
-    points(x, y, pch=16, cex=pmin(2, pmax(0.2, 0.02/error)), col=col)
-    segments(x, y-error, x, pmin(-1.3, y+error), lwd=pmax(0.2, pmin(2, 0.05/error)), col=col)
-    segments(cR$x1, y, cR$x2, y, lwd=pmax(0.2, pmin(2, 0.05/error)), col=col)
+    clonCex = pt.cex*pmax(0.2, pmin(2, sqrt(0.05/error)))
+    points(x, y, pch=16, cex=clonCex, col=col)
+    segments(x, y-error, x, pmin(-1.3, y+error), lwd=clonCex, col=col)
+    segments(cR$x1, y, cR$x2, y, lwd=clonCex, col=col)
   }
 }
 

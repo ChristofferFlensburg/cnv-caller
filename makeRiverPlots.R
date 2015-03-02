@@ -31,12 +31,13 @@ storyToLabel = function(stories, SNPs, genome) {
        SNPs[as.character(stories$x1), ]$inGene, ' (', xToChr(stories$x1, genome=genome), ')')[isSNP]
   dist = stories$x2-stories$x1
   distText = ifelse(dist >= 1e6, paste0(round(dist/1e6), 'Mbp '), ifelse(dist >= 1e3, paste0(round(dist/1e3), 'kbp '), paste0(dist, 'bp ')))
-  ret[!isSNP] = paste0(distText, call, ' (', xToChr(stories$x1, genome=genome), ')')[!isSNP]
+  ret[!isSNP & !is.na(dist)] = paste0(distText, call, ' (', xToChr(stories$x1, genome=genome), ')')[!isSNP & !is.na(dist)]
+  ret[!isSNP & is.na(dist)] = call[!isSNP & is.na(dist)]
   return(ret)
 }
 
 #main plotting function
-plotRiver = function(cloneTree, cloneStories, cloneLabels, normalise=T) {
+plotRiver = function(cloneTree, cloneStories, cloneLabels, normalise=T, xlim='default', ylim='default', labels=T, setPar=T) {
   names(cloneLabels) = rownames(cloneStories)
   stories = abs(cloneStories$stories)
   rownames(stories) = rownames(cloneStories)
@@ -50,28 +51,36 @@ plotRiver = function(cloneTree, cloneStories, cloneLabels, normalise=T) {
   if ( normalise ) stories = t(t(stories)/purity)
   if ( !leadingNormal ) {
     stories = cbind(rep(0, nrow(stories)), stories)
-    colnames(stories)[1] = 'normal'
+    colnames(stories)[1] = 'germline'
+    if ( any(rownames(stories)=='germline') ) stories['germline','germline'] = 1
   }
   x = 1:ncol(stories)
-  
-  par(oma=rep(0, 4))
-  par(mar=c(0, 4, 0, 0))
-  plot(1, type='n', xlim=c(1, max(x)+ceiling(nrow(cloneStories)/2)), ylim=c(-0.02,1), xaxt='n', frame.plot=F,
+
+  if ( setPar ) {
+    par(oma=rep(0, 4))
+    par(mar=c(0, 4, 0, 0))
+  }
+  if ( !labels & xlim[1] == 'default' ) xlim = c(1, max(x))
+  if ( labels & xlim[1] == 'default' ) xlim = c(1, max(x)+ceiling(nrow(cloneStories)/2))
+  if ( ylim[1] == 'default' ) ylim = c(-0.02,1)
+  plot(1, type='n', xlim=xlim, ylim=ylim, xaxt='n', frame.plot=F,
        ylab='clonality', xlab = '')
   cloneCols = addSubclone(cloneTree[[1]], stories, ylims = matrix(rep(c(0,1), ncol(stories)), nrow=2), margin=0.02)$usedCols
   for (i in 1:nrow(cloneStories)) {
     clone = rownames(cloneStories)[i]
     xText = max(x) + ceiling(i/2) - 0.9
     y0 = i/2 - floor(i/2)
-    clone = names(cloneCols)[i]
-    muts = cloneLabels[[clone]]
-    if ( length(muts) > 15 ) muts = c(muts[1:15], 'and more...')
-    col = cloneCols[i]
-    text(rep(xText, length(muts)), y0 + 0.5 - (1:length(muts))/33, muts, col=col, adj=0, cex=0.9)
+    if ( labels ) {
+      clone = names(cloneCols)[i]
+      muts = cloneLabels[[clone]]
+      if ( length(muts) > 15 ) muts = c(muts[1:15], 'and more...')
+      col = cloneCols[i]
+      text(rep(xText, length(muts)), y0 + 0.5 - (1:length(muts))/33, muts, col=col, adj=0, cex=0.9)
+    }
   }
 
-  segments(1:ncol(stories), 0.02, 1:ncol(stories), 1, lwd=5, col=rgb(0.7, 0.7, 0.7, 0.3))
-  segments(1:ncol(stories), 0.02, 1:ncol(stories), 1, lwd=2, col=rgb(0.3, 0.3, 0.3, 0.3))
+  segments(1:ncol(stories), 0.02, 1:ncol(stories), ylim[2], lwd=5, col=rgb(0.7, 0.7, 0.7, 0.3))
+  segments(1:ncol(stories), 0.02, 1:ncol(stories), ylim[2], lwd=2, col=rgb(0.3, 0.3, 0.3, 0.3))
   text(1:ncol(stories), -0.02, colnames(stories), srt=20, cex=0.9)
 
   par(oma=rep(0, 4))
@@ -171,7 +180,7 @@ addStreamSegment = function(x1, x2, y1low, y1high, y2low, y2high, range=c(0,1), 
 }
 
 
-plotStories = function(stories, SNPs, col='default', lty='default', add=F, alpha=1, xlab='sample', ylab='clonality',...) {
+plotStories = function(stories, SNPs, col='default', lty='default', add=F, alpha=1, xlab='sample', ylab='clonality', lwd='default', errorBars=T, setPar=T, legend=T, labels=T, xlim='default',...) {
   names = rownames(stories)
   clon = stories$stories
   ce = stories$errors
@@ -200,23 +209,31 @@ plotStories = function(stories, SNPs, col='default', lty='default', add=F, alpha
 
   
   if ( !add ) {
-    par(oma=rep(0, 4))
-    par(mar=c(0, 4, 0, 0))
-    plot(0,0, type='n', xlim=c(1, Nsample*1.3), ylim=c(-.02,1), xlab=xlab, ylab=ylab, xaxt='n', frame.plot=F, ...)
+    if ( setPar ) {
+      par(oma=rep(0, 4))
+      par(mar=c(0, 4, 0, 0))
+    }
+    if ( xlim[1] == 'default' ) xlim = c(1, Nsample*1.3)
+    plot(0,0, type='n', xlim=xlim, ylim=c(-.02,1), xlab=xlab, ylab=ylab, xaxt='n', frame.plot=F, ...)
   }
-  lwd = 1/(sqrt(0.1^2+ce[,1:(Nsample-1)]^2 + ce[,2:Nsample]^2)/0.2)^2
+  if (lwd[1] == 'default' ) lwd = 1/(sqrt(0.1^2+ce[,1:(Nsample-1)]^2 + ce[,2:Nsample]^2)/0.2)^2
   segments(col(clon)[,1:(Nsample-1)]+(row(clon)[,1:(Nsample-1)] - 0.5 - Nmut/2)/Nmut/4, clon[,1:(Nsample-1)],
            col(clon)[,2:Nsample    ]+(row(clon)[,2:Nsample    ] - 0.5 - Nmut/2)/Nmut/4, clon[,2:Nsample    ],
            col=segcol, lwd=lwd, lty=seglty)
-  lwd = 1/(sqrt(0.1^2+ce^2)/0.2)^2
-  segments(col(clon)+(row(clon) - 0.5 - Nmut/2)/Nmut/4, noneg(clon - ce),
-           col(clon)+(row(clon) - 0.5 - Nmut/2)/Nmut/4, clon + ce,
-           col=errcol, lwd=lwd, lty=errlty)
+  if ( errorBars ) {
+    if (lwd[1] == 'default' ) lwd = 1/(sqrt(0.1^2+ce^2)/0.2)^2
+    segments(col(clon)+(row(clon) - 0.5 - Nmut/2)/Nmut/4, noneg(clon - ce),
+             col(clon)+(row(clon) - 0.5 - Nmut/2)/Nmut/4, clon + ce,
+             col=errcol, lwd=lwd, lty=errlty)
+  }
 
   if ( !add ) {
-    legend('right', storyToLabel(stories, SNPs, genome), lwd=2, col=errcol[1:nrow(stories)], lty=errlty[1:nrow(stories)])
-    text(1:Nsample, -0.02, colnames(stories$stories), srt=20, cex=0.9)
-    par(oma=rep(0, 4))
-    par(mar=rep(4, 4))
+    if ( legend )
+      legend('right', storyToLabel(stories, SNPs, genome), lwd=2, col=errcol[1:nrow(stories)], lty=errlty[1:nrow(stories)])
+    if ( labels ) text(1:Nsample, -0.02, colnames(stories$stories), srt=20, cex=0.9)
+    if ( setPar ) {
+      par(oma=rep(0, 4))
+      par(mar=rep(4, 4))
+    }
   }
 }

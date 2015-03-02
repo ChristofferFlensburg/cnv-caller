@@ -15,7 +15,7 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, normals, Rdire
     ts = timeSeries[[i]]
     name = names(timeSeries)[i]
     qs = variants$variants[ts]
-    catLog('Tracking clonal evolution in ', name, '..', sep='')
+    catLog('\nTracking clonal evolution in ', name, '..', sep='')
     
     #select somatic SNPs
     somaticMx = do.call(cbind, lapply(qs, function(q) q$somaticP > 0.95))
@@ -24,62 +24,120 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, normals, Rdire
 
     #set clonality of SNPs from frequency and local CNV, return stories
     catLog('SNVs..\n')
-    snpStories = findSNPstories(somaticQs, cnvs[ts], normals[ts])
+    snpStories = findSNPstories(somaticQs, cnvs[ts], normals[ts], filter=T)
     catLog('Keeping', nrow(snpStories), 'SNV stories.\n')
 
     #combine CNV calls over sample into stories
     catLog('Tracking clonal evolution in CNVs..')
-    cnvStories = getCNVstories(cnvs[ts], normals[ts])
+    cnvStories = getCNVstories(cnvs[ts], normals[ts], filter=T)
     catLog('Keeping', nrow(cnvStories), 'CNV stories.\n')
 
-    #cluster stories for SNPs, CNVs, both.
+    #merge SNV and CNA stories.
     catLog('merge events into clones..')
-    allStories = data.frame(row.names=c(rownames(snpStories), rownames(cnvStories)))
-    allStories$x1 = c(snpStories$x1, cnvStories$x1)
-    allStories$x2 = c(snpStories$x2, cnvStories$x2)
-    allStories$call = c(as.character(snpStories$call), as.character(cnvStories$call))
-    allStories$stories = as.matrix(rbind(snpStories$stories, cnvStories$stories))
-    allStories$errors = as.matrix(rbind(snpStories$errors, cnvStories$errors))
+    allStories = data.frame(row.names=c('germline', rownames(snpStories), rownames(cnvStories)), stringsAsFactors=F)
+    allStories$x1 = c(NA, snpStories$x1, cnvStories$x1)
+    allStories$x2 = c(NA, snpStories$x2, cnvStories$x2)
+    allStories$call = c('germline', as.character(snpStories$call), as.character(cnvStories$call))
+    allStories$stories = as.matrix(rbind(matrix(rep(1, length(qs)), nrow=1), snpStories$stories, cnvStories$stories))
+    allStories$errors = as.matrix(rbind(matrix(rep(0, length(qs)), nrow=1), snpStories$errors, cnvStories$errors))
     rownames(allStories$stories) = rownames(allStories$errors) = rownames(allStories)
-    clusteredStories = storiesToCloneStories(allStories, variants$SNPs, plotProgress=F, plot=F)
 
+    #clusters stories into clones
+    clusteredStories = storiesToCloneStories(allStories, variants$SNPs, plotProgress=F, plot=F)
+    germlineCluster = which(apply(clusteredStories$cloneStories$stories + 1e-3 > 1, 1, all) &
+      apply(clusteredStories$cloneStories$errors-1e-5 < 0, 1, all))
+    rownames(clusteredStories$cloneStories)[germlineCluster] = clusteredStories$cloneStories$call[germlineCluster] = 'germline'
+    rownames(clusteredStories$cloneStories$stories)[germlineCluster] = rownames(clusteredStories$cloneStories$errors)[germlineCluster] = 'germline'
+
+    #add in previously filtered SNV and CNA stories if they fit with the found clones
+    filteredSnpStories = findSNPstories(somaticQs, cnvs[ts], normals[ts], filter=F)
+    filteredSnpStories = filteredSnpStories[!(rownames(filteredSnpStories) %in% snpStories),]
+    filteredCnvStories = getCNVstories(cnvs[ts], normals[ts], filter=F)
+    filteredCnvStories = filteredCnvStories[!(rownames(filteredCnvStories) %in% cnvStories),]
     
+    filteredStories = combineStories(filteredSnpStories, filteredCnvStories)
+    filteredStories = filteredStories[!(rownames(filteredStories) %in% rownames(allStories)),]
+
+    if ( nrow(filteredStories) > 0 )
+      clusteredStories = mergeStories(clusteredStories, filteredStories)
+
+    if ( any(!(unlist(clusteredStories$storyList) %in% rownames(allStories))) ) {
+      addedStories = unlist(clusteredStories$storyList)[!(unlist(clusteredStories$storyList) %in% rownames(allStories))]
+      allStories = combineStories(allStories, filteredStories[addedStories,])
+    }
+
+    #pick out the variants that behave like germline, ie present clonaly in all samples
+    germlineVariants = clusteredStories$storyList[[which(rownames(clusteredStories$cloneStories) == 'germline')]]
+    germlineVariants = germlineVariants[germlineVariants != 'germline']
+
     #combine the clustered stories into clonal evolution (figure out which is subclone of which)
     catLog('decide subclone structure..')
     cloneTree = findCloneTree(clusteredStories$cloneStories)
     
-    stories[[name]] = list('all'=allStories, 'clusters'=clusteredStories, 'cloneTree'=cloneTree)
+    stories[[name]] = list('all'=allStories, 'clusters'=clusteredStories, 'cloneTree'=cloneTree, 'germlineVariants'=germlineVariants)
     catLog('done!\n')
   }
 
+  #flag variants that ended up in the germline clone
+  catLog('\nMarking SNV that behave like germline SNPs..')
+  variants$variants = lapply(variants$variants, function(q) {
+    q$germline = rep(NA, nrow(q))
+    return(q)
+  })
+  for ( ind in names(stories) ) {
+    story = stories[[ind]]
+    if ( length(story$germlineVariants) > 0 ) {
+      SNVs = story$germlineVariants[grep('^[0-9]', story$germlineVariants)]
+      if ( length(SNVs) > 0 ) {
+        samples = timeSeries[[ind]]
+        variants$variants[samples] = lapply(variants$variants[samples], function(q) {
+          q$germline = rownames(q) %in% SNVs
+          return(q)
+          })
+      }
+    }
+  }
+  allVariants = list('variants'=variants, 'normalVariants'=normalVariants)
+  allVariantSaveFile = paste0(Rdirectory, '/allVariants.Rdata')
+  save('allVariants', file=allVariantSaveFile)
+  catLog('done!\n')
+
+
   #return clustered and raw stories
-  catLog('Saving stories.\n')
+  stories = list('stories'=stories, 'variants'=variants, 'normalVariants'=normalVariants)
+  catLog('Saving stories..')
   save('stories', file=saveFile)
+  catLog('done!\n\n\n')
   return(stories)
 }
 
-findSNPstories = function(somaticQs, cnvs, normal) {
+findSNPstories = function(somaticQs, cnvs, normal, filter=T) {
+  if ( nrow(somaticQs[[1]]) == 0 ) return(data.frame(x1=integer(), x2=integer(), call=character(), stories=numeric(), errors=numeric(), stringsAsFactors=F))
   cov10 = rowMeans(do.call(cbind, lapply(somaticQs, function(q) q$cov))) >= 10
   somaticQs = lapply(somaticQs, function(q) q[cov10,])
   somaticQs = findSNPclonalities(somaticQs, cnvs)
   clonality = matrix(sapply(somaticQs, function(q) q$clonality), ncol=length(somaticQs))
   clonalityError = matrix(sapply(somaticQs, function(q) q$clonalityError), ncol=length(somaticQs))
-  ret = data.frame(x1=somaticQs[[1]]$x, x2=somaticQs[[1]]$x, call=rownames(somaticQs[[1]]), row.names=rownames(somaticQs[[1]]))
+  ret = data.frame(x1=somaticQs[[1]]$x, x2=somaticQs[[1]]$x, call=rownames(somaticQs[[1]]), row.names=rownames(somaticQs[[1]]), stringsAsFactors=F)
   ret$stories = clonality
   ret$errors = clonalityError
 
-  allSmall = rowSums(is.na(ret$errors) | ret$stories - ret$errors < 0.3 | ret$errors > 0.2) == ncol(ret$stories)
+  colnames(ret$stories) = colnames(ret$errors) = names(somaticQs)
+  if ( !filter ) return(ret)
+  
+  allSmall = rowSums(is.na(ret$errors) | ret$stories - ret$errors*1.5 < 0.2 | ret$errors > 0.2) == ncol(ret$stories)
   ret = ret[!allSmall,]
   uncertain = rowMeans(ret$errors) > 0.2
   ret = ret[!uncertain,]
+  indel = grepl('[-\\+]', rownames(ret))
+  ret = ret[!indel,]
   if ( any(normal) ) {
     notNormal = ret$stories[,normal] > 0.05
     ret = ret[!notNormal,]
-    catLog('Filtered ', sum(allSmall) , ' small, ', sum(uncertain), ' uncertain and ', sum(notNormal), ' present in normal stories.\n', sep='')
+    catLog('Filtered ', sum(allSmall), ' small, ', sum(uncertain), ' uncertain, ', sum(indel), ' indel and ', sum(notNormal), ' present in normal stories.\n', sep='')
   }
-  else catLog('Filtered ', sum(allSmall) , ' small and ', sum(uncertain), ' uncertain stories.\n', sep='')
+  else catLog('Filtered ', sum(allSmall) , ' small, ', sum(uncertain), ' uncertain and ', sum(indel), ' indel stories.\n', sep='')
 
-  colnames(ret$stories) = colnames(ret$errors) = names(somaticQs)
   return(ret)
 }
 
@@ -89,6 +147,10 @@ findLocalCNV = function(qs, cnvs) {
     call = sapply(x, function(X) c(cnvs[[i]]$clusters$call[which(X > cnvs[[i]]$clusters$x1-300 & X < cnvs[[i]]$clusters$x2+300)], 'AB')[1])
     clonality = sapply(x, function(X) c(cnvs[[i]]$clusters$clonality[which(X > cnvs[[i]]$clusters$x1-300 & X < cnvs[[i]]$clusters$x2+300)], 1)[1])
     clonalityError = sapply(x, function(X) c(cnvs[[i]]$clusters$clonalityError[which(X > cnvs[[i]]$clusters$x1-300 & X < cnvs[[i]]$clusters$x2+300)], 0)[1])
+    if ( any(grepl('CL', call)) ) {
+      call[grepl('CL', call)] = 'AB'
+      clonality[grepl('CL', call)] = 1 - clonality[grepl('CL', call)]
+    }
     qs[[i]]$CNV = call
     qs[[i]]$CNVclonality = clonality
     qs[[i]]$CNVclonalityError = clonalityError
@@ -102,9 +164,12 @@ findSNPclonalities = function(somaticQs, cnvs) {
   somaticQs = lapply(somaticQs, function(q) {
     nA = nchar(q$CNV) - nchar(gsub('A', '', q$CNV))
     nB = nchar(q$CNV) - nchar(gsub('B', '', q$CNV))
+
+    noCNV = q$CNV %in% c('AB', 'AB?', 'AB??')
+
     #calculate expected frequencies range if the SNP is on the A or B allele of the CNV, or in the AB background.
-    cloneMin = pmax(0, q$CNVclonality-q$CNVclonalityError)
-    cloneMax = pmin(1, q$CNVclonality+q$CNVclonalityError)
+    cloneMin = ifelse(noCNV, 0, pmax(0, q$CNVclonality-q$CNVclonalityError))
+    cloneMax = ifelse(noCNV, 0, pmin(1, q$CNVclonality+q$CNVclonalityError))
     fAmin = nA*cloneMin/((nA+nB)*cloneMin + 2*(1-cloneMin))
     fAmax = nA*cloneMax/((nA+nB)*cloneMax + 2*(1-cloneMax))
     fBmin = nB*cloneMin/((nA+nB)*cloneMin + 2*(1-cloneMin))
@@ -117,29 +182,71 @@ findSNPclonalities = function(somaticQs, cnvs) {
     f[q$cov==0] = 0
     closestFA = ifelse(f < fAmin, fAmin, ifelse(f > fAmax, fAmax, f))
     closestFB = ifelse(f < fBmin, fBmin, ifelse(f > fBmax, fBmax, f))
-    closestFN = ifelse(f < fNmin, fNmin, ifelse(f > fNmax, fNmax, f))
+    closestFN = ifelse(f < fNmax, f, fNmax)
     pA = pBinom(q$cov, q$var, closestFA)
     pB = pBinom(q$cov, q$var, closestFB)
     pN = pBinom(q$cov, q$var, closestFN)
 
-    homeAllele = ifelse(q$CNV %in% c('AB', 'AB?', 'AB??', 'CL'), 'N', ifelse(pA > pmax(pB, pN), 'A', ifelse(pB > pN, 'B', 'N')))
-    homeAllele[f==0] = 'N'
-    clonality = pmin(1, ifelse(homeAllele == 'A', 2*f/(nA+f*(2-nA-nB)),
-      ifelse(homeAllele == 'B', 2*f/(nB+f*(2-nA-nB)), 1 - (1 - f*2)/(f*(nA+nB-2)+1))))
-    clonality[f==0] = 0
+    clonalityA = pmin(1, 2*f/(nA+f*(2-nA-nB)))
+    clonalityB = pmin(1, 2*f/(nB+f*(2-nA-nB)))
+    clonalityN = pmin(1, 1 - (1 - f*2)/(f*(nA+nB-2)+1))
 
     #frequency error estimate: add up the poissonian width with the RIB as independent normal error sources.
     fErr = sqrt(frequencyError(q$var, q$cov, p0=0.15)^2 + q$RIB^2)
     fErr[q$cov==0] = 1
     #propagate to clonality
-    clonalityHigh = ifelse(homeAllele == 'A', 2/(2+nA/(f+fErr)-nA-nB),
-      ifelse(homeAllele == 'B', 2/(2+nB/(f+fErr)-nA-nB), 1 - (1 - (f+fErr)*2)/((f+fErr)*(nA+nB-2)+1)))
-    #Not allowing the lower limit to go into negatives reduces the error estimate of low frequnecies
+    clonalityHighA = 2/(2+nA/(f+fErr)-nA-nB)
+    clonalityHighB = 2/(2+nB/(f+fErr)-nA-nB)
+    clonalityHighN = 1 - (1 - (f+fErr)*2)/(pmin(1, f+fErr)*(nA+nB-2)+1)
+    #Not allowing the lower limit to go into negatives reduces the error estimate of low frequencies
     #and is associated with a prior bias towards clonality 0 for low frequencies.
-    clonalityLow = pmax(0, ifelse(homeAllele == 'A', 2/(2+nA/(f-fErr)-nA-nB),
-      ifelse(homeAllele == 'B', 2/(2+nB/(f-fErr)-nA-nB), 1 - (1 - (f-fErr)*2)/((f-fErr)*(nA+nB-2)+1))))
-    clonalityError = (clonalityHigh - clonalityLow)/2
+    clonalityLowA = pmax(0, 2/(2+nA/(f-fErr)-nA-nB))
+    clonalityLowB = pmax(0, 2/(2+nB/(f-fErr)-nA-nB))
+    clonalityLowN = pmax(0, 1 - (1 - (f-fErr)*2)/((f-fErr)*(nA+nB-2)+1))
+      
+    clonalityErrorA = abs(clonalityHighA - clonalityLowA)/2
+    clonalityErrorB = abs(clonalityHighB - clonalityLowB)/2
+    clonalityErrorN = abs(clonalityHighN - clonalityLowN)/2
     #clonalityError[f==0] = fErr[f==0]
+
+    #if the B allele is lost, and the SNV is clonal in the N-cells, assume that the SNV
+    #was present in the cells with the lost B-allele as well, giving a clonality of 1.
+    lostSNV = nB==0 & abs(clonalityN+q$CNVclonality - 1) < q$CNVclonalityError
+    if ( any(lostSNV) ) clonalityN[lostSNV] = 1
+
+    consistentA = pA > 0.1 & clonalityLowA <= cloneMax
+    consistentB = pB > 0.1 & clonalityLowB <= cloneMax
+    consistentN = pN > 0.1 & clonalityLowN <= 1-cloneMin
+    homeAllele =
+      ifelse(q$CNV %in% c('AB', 'AB?', 'AB??', 'CL'),
+             'N',
+             ifelse(consistentA & (!consistentB | clonalityB <= clonalityA) & (!consistentN | clonalityN <= clonalityA),
+                    'A',
+                    ifelse(consistentB & (!consistentN | clonalityN <= clonalityB),
+                           'B',
+                           'N')))
+    clonality = ifelse(homeAllele == 'A', clonalityA, ifelse(homeAllele == 'B', clonalityB, clonalityN))
+    homeAllele[f==0] = 'N'
+    clonality[f==0] = 0
+    clonalityError = ifelse(homeAllele == 'A', clonalityErrorA, ifelse(homeAllele == 'B', clonalityErrorB, clonalityErrorN))
+
+    #check for calls where several different home alleles are possible, and increase
+    #error estimate accordingly
+    uncertainCalls = which(consistentA + consistentB + consistentN > 1)
+    if ( length(uncertainCalls) > 0 ) {
+      clonalityVar = sapply(uncertainCalls, function(i) var(c(clonalityA[i], clonalityB[i], clonalityN[i])[c(consistentA[i], consistentB[i], consistentN[i])]))
+      clonalityError[uncertainCalls] = sqrt(clonalityError[uncertainCalls]^2 + clonalityVar)
+    }
+
+    #check if the snv can be a germline SNP, ie present both on the N and one of the A or B alleles.
+    #if so, make sure that the clonality error reaches 100%.
+    SNPfA = (q$CNVclonality*nA + 1-q$CNVclonality)/(2*(1-q$CNVclonality) + q$CNVclonality*(nA+nB))
+    SNPfB = (q$CNVclonality*nB + 1-q$CNVclonality)/(2*(1-q$CNVclonality) + q$CNVclonality*(nA+nB))
+    canBeSNPA = pBinom(q$cov, q$var, SNPfA)
+    canBeSNPB = pBinom(q$cov, q$var, SNPfB)
+    canBeSNP = canBeSNPA > 0.1 | canBeSNPB > 0.1
+    clonalityError[canBeSNP] = pmax(clonalityError[canBeSNP], (1-clonality)[canBeSNP])
+
 
     q$homeAllele = homeAllele
     q$clonality = noneg(clonality)
@@ -205,44 +312,44 @@ frequencyError = function(var, cov, p0=0.15) {
   return(error)
 }
 
-getCNVstories = function(cnvs, normal) {
+getCNVstories = function(cnvs, normal, filter=T) {
   regions = splitRegions(cnvs)
   catLog(nrow(regions), ' regions..', sep='')
   events = splitEvents(cnvs, regions)
   catLog(nrow(regions), ' events.\nExtracting stories..', sep='')
-  stories = cnvsToStories(cnvs, events, normal)
+  stories = cnvsToStories(cnvs, events, normal, filter=filter)
   return(stories)
 }
 
 splitRegions = function(cnvs) {
-  regions = data.frame('x1' = c(), 'x2' = c())
+  regions = data.frame('x1' = c(), 'x2' = c(), stringsAsFactors=F)
   cnvX1 = unique(unlist(sapply(cnvs, function(cnv) cnv$cluster$x1)))
   cnvX2 = unique(unlist(sapply(cnvs, function(cnv) cnv$cluster$x2)))
   x1 = x2 = -Inf
   while (x1 < max(cnvX1)) {
     x1 = min(cnvX1[cnvX1 >= x2])
     x2 = min(cnvX2[cnvX2 > x1])
-    regions = rbind(regions, data.frame('x1'=x1, 'x2'=x2))
+    regions = rbind(regions, data.frame('x1'=x1, 'x2'=x2), stringsAsFactors=F)
   }
   return(regions)
 }
 
 splitEvents = function(cnvs, regions) {
-  events = data.frame('x1' = c(), 'x2' = c(), 'call' = c())
+  events = data.frame('x1' = c(), 'x2' = c(), 'call' = c(), stringsAsFactors=F)
   cnvX1 = unlist(sapply(cnvs, function(cnv) cnv$cluster$x1))
   cnvX2 = unlist(sapply(cnvs, function(cnv) cnv$cluster$x2))
   cnvCalls = unlist(sapply(cnvs, function(cnv) cnv$cluster$call))
   for ( i in 1:nrow(regions) ) {
     calls = unique(cnvCalls[cnvX1 <= regions$x1[i] & cnvX2 >= regions$x2[i]])
     calls = calls[!(calls %in% c('AB', 'AB?', 'AB??'))]
-    for ( call in calls ) events = rbind(events, data.frame('x1' = regions$x1[i], 'x2' = regions$x2[i], 'call' = call))
+    for ( call in calls ) events = rbind(events, data.frame('x1' = regions$x1[i], 'x2' = regions$x2[i], 'call' = call, stringsAsFactors=F))
   }
   events = events[!grepl('\\?', events$call),]
   return(events)
 }
 
-cnvsToStories = function(cnvs, events, normal) {
-  stories = errors = data.frame()
+cnvsToStories = function(cnvs, events, normal, filter=T) {
+  stories = errors = data.frame(stringsAsFactors=F)
   if ( nrow(events) > 0 ) {
     i=1
     while ( i <= nrow(events) ) {
@@ -275,34 +382,41 @@ cnvsToStories = function(cnvs, events, normal) {
   ret$errors = as.matrix(errors)
   ret$errors[is.na(ret$errors)] = 1
 
-  allSmall = rowSums(ret$stories - ret$errors < 0.3 | ret$errors > 0.2) == ncol(ret$stories)
+  if ( !filter ) return(ret)
+  
+  allSmall = rowSums(ret$stories - ret$errors*1.5 < 0.2 | ret$errors > 0.2) == ncol(ret$stories)
   ret = ret[!allSmall,]
   uncertain = rowMeans(ret$errors) > 0.2
   ret = ret[!uncertain,]
   notSignificant = rowSums(abs(ret$stories) < ret$errors*1.5 | is.na(ret$errors)) >= ncol(ret$stories)
   ret = ret[!notSignificant,]
+  smallRegion = ret$x2 - ret$x1 < 5e6
+  ret = ret[!smallRegion,]
   if ( any(normal) ) {
     notNormal = ret$stories[,normal] > ret$errors[,normal]+0.05
     ret = ret[!notNormal,]
-    catLog('Filtered ', sum(allSmall) , ' small, ', sum(uncertain), ' uncertain and ', sum(notNormal), ' present in normal stories.\n', sep='')
+    catLog('Filtered ', sum(allSmall) , ' small, ', sum(uncertain), ' uncertain, ', sum(smallRegion), ' small region and ', sum(notNormal), ' present in normal stories.\n', sep='')
   }
-  else catLog('Filtered ', sum(allSmall) , ' small and ', sum(uncertain), ' uncertain stories.\n', sep='')
+  else catLog('Filtered ', sum(allSmall) , ' small, ', sum(uncertain), ' uncertain and ', sum(smallRegion), ' small region stories.\n', sep='')
+  falseSNPcalls = ret$call == 'AA' & (ret$x2 - ret$x1 < 2e6 | rowMeans(ret$errors) > 0.1 ) 
+  ret = ret[!falseSNPcalls,]
+  catLog('Filtered ', sum(falseSNPcalls) , ' stories that are likely based on false SNPs.\n', sep='')
   return(ret)
 }
 
 extractClonalities = function(cnvs, event) {
   nSample = length(cnvs)
-  subCR = do.call(rbind, lapply(cnvs, function(cs) mergeToOneRegion(cs$CR[cs$CR$x1 >= event$x1 & cs$CR$x2 <= event$x2,,drop=F])))
-  subFreqs = lapply(cnvs, function(cs) cs$freqs[cs$freqs$x >= event$x1 & cs$freqs$x <= event$x2,])
+  subCR = do.call(rbind, lapply(cnvs, function(cs) mergeToOneRegion(cs$CR[cs$CR$x1 >= event$x1 & cs$CR$x2 <= event$x2,,drop=F], cs$eFreqs)))
+  subFreqs = lapply(cnvs, function(cs) cs$eFreqs[cs$eFreqs$x >= event$x1 & cs$eFreqs$x <= event$x2,])
   subFreqsMirror = lapply(cnvs, function(cs) {
-    ret=cs$freqs[cs$freqs$x >= event$x1 & cs$freqs$x <= event$x2,]
+    ret=cs$eFreqs[cs$eFreqs$x >= event$x1 & cs$eFreqs$x <= event$x2,]
     ret$var = mirrorDown(ret$var, ret$cov)
     return(ret)
     })
   fM = callTofM(as.character(event$call))
   ret = as.data.frame(do.call(rbind, lapply(1:nSample, function(sample)
-    unlist(isCNV(cluster=subCR[sample,], freqs=subFreqsMirror[[sample]], M=log2(fM[2]), f=fM[1],
-                 prior=callPrior(as.character(event$call)))))))
+    unlist(isCNV(cluster=subCR[sample,], efs=subFreqsMirror[[sample]], M=fM[2], f=fM[1],
+                 prior=callPrior(as.character(event$call)))))), stringsAsFactors=F)
   direction = rep(0, nSample)
 
   if ( fM[1] != 0.5 ) {
@@ -323,14 +437,16 @@ extractClonalities = function(cnvs, event) {
   return(ret)
 }
 
-mergeToOneRegion = function(cR) {
+mergeToOneRegion = function(cR, eFreqs) {
   cR$x2[1] = cR$x2[nrow(cR)]
   cR$var[1] = sum(cR$var)
   cR$cov[1] = sum(cR$cov)
   cR$M[1] = sum(cR$M/cR$width^2)/sum(1/cR$width^2)
   cR$width[1] = 1/sqrt(sum(1/cR$width^2))
   cR = cR[1,]
-  cR$f = refUnbias(cR$var/cR$cov)
+  cf = correctedFrequency(cR, eFreqs)
+  cR$f = cf[,'f']
+  cR$ferr = cf[,'ferr']
   return(cR)
 }
 
@@ -365,7 +481,6 @@ storiesToCloneStories = function(stories, SNPs, minDistance=3, plotProgress=F, p
   if ( length(storyList) < 2 ) 
     return(list('cloneStories'=stories, 'storyList'=storyList))
 
-  
   distance = do.call(rbind, lapply(1:length(storyList), function(is) sapply(1:length(storyList), function(js) pairScore(stories, is, js))))
   distance = distance + (minDistance+1)*as.numeric(row(distance) == col(distance))
   while ( any(distance < minDistance) ) {
@@ -376,12 +491,13 @@ storiesToCloneStories = function(stories, SNPs, minDistance=3, plotProgress=F, p
     storyList[[merge[1]]] = c(storyList[[merge[1]]], storyList[[merge[2]]])
     distance[merge[1],] = distance[,merge[1]] = sapply(1:length(storyList), function(j)
                                       pairScore(stories, storyList[[merge[1]]], storyList[[j]]) + (minDistance+1)*as.numeric(j==merge[1]))
-    distance = distance[-merge[2], -merge[2]]
+    distance = distance[-merge[2], -merge[2], drop=F]
     storyList = storyList[-merge[2]]
   }
   
   st = do.call(rbind, lapply(storyList, function(rows) {
     err = stories$errors[rows,,drop=F]
+    if ( any(err<=0) ) err[err<=0] = rep(min(c(1,err[err>0]))/1e6, sum(err<=0))
     st = stories$stories[rows,,drop=F]
     w = t(1/t(err^2)/colsums(1/err^2))
     mean = colsums(st*w)
@@ -394,7 +510,7 @@ storiesToCloneStories = function(stories, SNPs, minDistance=3, plotProgress=F, p
   }))
   rownames(err) = rownames(st) = 1:length(storyList)
   colnames(err) = colnames(st) = colnames(stories$stories)
-  clusters = data.frame('call'=rep('clone', length(storyList)), 'x1'=rep(NA, length(storyList)), 'x2'=rep(NA, length(storyList)), row.names=1:length(storyList))
+  clusters = data.frame('call'=rep('clone', length(storyList)), 'x1'=rep(NA, length(storyList)), 'x2'=rep(NA, length(storyList)), row.names=1:length(storyList), stringsAsFactors=F)
   clusters$stories = st
   clusters$errors = err
 
@@ -408,6 +524,7 @@ pairScore = function(stories, is, js) {
   if ( length(is) == 1 ) rms1 = noneg(0.5 - mean(stories$errors[is,]))
   else {
     err1 = stories$errors[is,]
+    if ( any(err1<=0) ) err1[err1<=0] = rep(min(c(1,err1[err1>0]))/1e6, sum(err1<=0))
     st1 = stories$stories[is,]
     w1 = t(1/t(err1^2)/colsums(1/err1^2))
     mean1 = colSums(st1*w1)
@@ -417,6 +534,7 @@ pairScore = function(stories, is, js) {
   if ( length(js) == 1 ) rms2 = noneg(0.5 - mean(stories$errors[js,]))
   else {
     err2 = stories$errors[js,]
+    if ( any(err2<=0) ) err2[err2<=0] = rep(min(c(1,err2[err2>0]))/1e6, sum(err2<=0))
     st2 = stories$stories[js,]
     w2 = t(1/t(err2^2)/colsums(1/err2^2))
     mean2 = colSums(st2*w2)
@@ -426,6 +544,7 @@ pairScore = function(stories, is, js) {
   unpairedRms = sqrt(rms1^2+rms2^2)
 
   err = stories$errors[c(is,js),]
+  if ( any(err<=0) ) err[err<=0] = rep(min(c(1,err[err>0]))/1e6, sum(err<=0))
   st = stories$stories[c(is,js),]
   w = t(1/t(err^2)/colsums(1/err^2))
   mean = colSums(st*w)
@@ -495,4 +614,39 @@ enforceTransitive = function(mx) {
     mx[,col] = mx[,col] | rowsums(mx[,mx[,col],drop=F]) > 0
   }
   return(mx)
+}
+
+#add the filtered stories to the clone stories if consistent.
+mergeStories = function(clusteredStories, filteredStories) {
+  distance = sapply(1:nrow(clusteredStories$cloneStories), function(cloneRow) {
+    sapply(1:nrow(filteredStories), function(storyRow) {
+      cloneStoryRMS(clusteredStories$cloneStories[cloneRow,], filteredStories[storyRow,])
+    })
+  })
+  closestDistance = apply(distance, 1, min)
+  toMerge = which(closestDistance <= 1)
+  bestClone = sapply(toMerge, function(row) which(distance[row,] == closestDistance[row])[1])
+  for ( i in 1:length(toMerge) )
+    clusteredStories$storyList[[bestClone[i]]] = c(clusteredStories$storyList[[bestClone[i]]], rownames(filteredStories)[toMerge[i]])
+
+  return(clusteredStories)
+}
+
+#distance between a story and a clone
+cloneStoryRMS = function(clone, story, systematicVariance=0.02) {
+  errors = sqrt(clone$errors^2+story$errors^2)+0.02
+  sigmas = (clone$stories - story$stories)/errors
+  rms = sqrt(mean(sigmas^2))
+  return(rms)
+}
+
+combineStories = function(stories1, stories2) {
+  ret = data.frame(row.names=c(rownames(stories1), rownames(stories2)), stringsAsFactors=F)
+  ret$x1 = c(stories1$x1, stories2$x1)
+  ret$x2 = c(stories1$x2, stories2$x2)
+  ret$call = c(as.character(stories1$call), as.character(stories2$call))
+  ret$stories = as.matrix(rbind(stories1$stories, stories2$stories))
+  ret$errors = as.matrix(rbind(stories1$errors, stories2$errors))
+  rownames(ret$stories) = rownames(ret$errors) = rownames(ret)
+  return(ret)
 }

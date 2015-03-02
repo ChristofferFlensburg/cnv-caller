@@ -64,6 +64,7 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
     variants = lapply(bamFiles, function(file) {
       QCsnps(pileups=importQualityScores(SNPs, file, BQoffset, genome=genome, cpus=cpus)[[1]], SNPs=SNPs, cpus=cpus)})
     names(variants)=names
+    variants = lapply(variants, function(q) q[apply(!is.na(q), 1, any),])
     variants = shareVariants(variants)
     
     present = rowSums(sapply(variants, function(q) q$var > q$cov*0.05)) > 0
@@ -119,7 +120,7 @@ varScanSNPToMut = function(files, genome='hg19') {
 
   catLog('Reading file ', files, '...', sep='')
   raw = read.table(files, fill=T, skip=0, row.names=NULL, header=F, as.is=T)
-  catLog('done. Processing data...')
+  catLog('done.\nProcessing data...')
   if ( nrow(raw) == 1 ) return(matrix(1, nrow=0, ncol=22))
   raw = raw[-1,]
   cons = strsplit(as.character(raw$V5), ':')
@@ -152,7 +153,7 @@ varScanSNPToMut = function(files, genome='hg19') {
   rownames(ret) = ret$x
   catLog('done.\n')
   
-  catLog('Returning data frame of dimension', dim(ret), '.\n')
+  catLog('Returning data frame of dimension', dim(ret), '\n')
   return(ret)
 }
 
@@ -219,6 +220,7 @@ importQualityScores = function(SNPs, files, BQoffset, genome='hg19', cpus=10) {
   chr = as.character(SNPs$chr)
   if ( genome == 'mm10' ) chr = paste0('chr', chr)
   for ( file in files ) {
+    catLog(as.character(Sys.time()), '\n')
     catLog('Importing', length(chr), 'pileups by chr from', file, '\n')
     if ( cpus > 1 ) {
       listRet = mclapply(unique(chr), function(ch) {
@@ -243,12 +245,15 @@ getQuality = function(file, chr, pos, BQoffset, cpus=1) {
   require(parallel)
   which = GRanges(chr, IRanges(pos-3, pos+3))
   p1 = ScanBamParam(which=which, what=c('pos', 'seq', 'cigar', 'qual', 'mapq', 'strand'))
+  catLog('importing reads from chr ', chr[1], '..', sep='')
   regionReads = scanBam(file, param=p1)
+  catLog('reads to pileup in chr ', chr[1], '..', sep='')
   if ( cpus > 1 )
     pileups = mclapply(1:length(pos), function(i) {
       return(readsToPileup(regionReads[[i]], pos[i], BQoffset=BQoffset))}, mc.cores=cpus)
   else
     pileups = lapply(1:length(pos), function(i) readsToPileup(regionReads[[i]], pos[i], BQoffset=BQoffset))
+  catLog('got ', length(pileups), ' pileups from chr ', chr[1], '.', sep='')
   return(pileups)
 }
 readsToPileup = function(reads, pos, BQoffset) {
@@ -454,15 +459,19 @@ QCsnps = function(pileups, SNPs, cpus=10) {
   variants = as.character(SNPs$variant)
   xs = SNPs$x
   catLog('QCing', length(pileups), 'positons...')
-  ret = do.call(rbind, mclapply(1:length(pileups), function(i) {
+  catLog(as.character(Sys.time()), '\n')
+  ret = mclapply(1:length(pileups), function(i) {
     if ( i/10000 == round(i/10000) ) catLog(i/1000, 'k..', sep='')
     return(QCsnp(pileups[[i]], references[i], xs[i], variant='', defaultVariant=variants[i]))
-  }, mc.cores=cpus))
+  }, mc.cores=cpus)
+  ret = mergeVariantList(ret)
   rownames(ret) = paste0(ret$x, ret$variant)
   catLog('done.\n')
   catLog('Variants:', nrow(ret), '\n')
-  catLog('Unflagged:', sum(ret$flag==''), '\n')
-  catLog('Average coverage over unflagged variants:', mean(ret$cov[ret$flag=='']), '\n')
+  catLog('Unflagged :', sum(ret$flag==''), '\n')
+  catLog('Unflagged over 0%  freq :', sum(ret$var > 0 & ret$flag==''), '\n')
+  catLog('Unflagged over 20% freq :', sum(ret$var > ret$cov/5 & ret$flag==''), '\n')
+  catLog('Median coverage over unflagged variants:', median(ret$cov[ret$flag=='']), '\n')
   catLog('Repeat flags:', length(grep('Rep', ret$flag)), '\n')
   catLog('Mapping quality flags:', length(grep('Mq', ret$flag)), '\n')
   catLog('Base quality flags:', length(grep('Bq', ret$flag)), '\n')
@@ -470,6 +479,24 @@ QCsnps = function(pileups, SNPs, cpus=10) {
   catLog('Single variant read flags:', length(grep('Svr', ret$flag)), '\n')
   catLog('Single reference read flags:', length(grep('Srr', ret$flag)), '\n')
   catLog('Minor variant flags:', length(grep('Mv', ret$flag)), '\n')
+  catLog('Stutter flags:', length(grep('St', ret$flag)), '\n')
+  return(ret)
+}
+mergeVariantList = function(variantList) {
+  dat = unlist(variantList)
+  nrow = length(variantList)
+  ret = data.frame(
+    'x'=as.numeric(dat[grep('^x',names(dat))]),
+    'reference'=dat[grep('^reference',names(dat))],
+    'variant'=dat[grep('^variant',names(dat))],
+    'cov'=as.numeric(dat[grep('^cov',names(dat))]),
+    'ref'=as.numeric(dat[grep('^ref[0-9]*$',names(dat))]),
+    'var'=as.numeric(dat[grep('^var[0-9]*$',names(dat))]),
+    'pbq'=as.numeric(dat[grep('^pbq',names(dat))]),
+    'pmq'=as.numeric(dat[grep('^pmq',names(dat))]),
+    'psr'=as.numeric(dat[grep('^psr',names(dat))]),
+    'RIB'=as.numeric(dat[grep('^RIB',names(dat))]),
+    'flag'=dat[grep('^flag',names(dat))], stringsAsFactors=F)
   return(ret)
 }
 QCsnp = function(pileup, reference, x, variant='', defaultVariant='') {
@@ -477,7 +504,7 @@ QCsnp = function(pileup, reference, x, variant='', defaultVariant='') {
     return(data.frame('x'=x, 'reference'=reference, 'variant'='', 'cov'=0, 'ref'=0, 'var'=0,
                       'pbq'=1, 'pmq'=1, 'psr'=1, 'RIB'=0, 'flag'='err:atomic', stringsAsFactors=F))
   }
-  
+
   ref = pileup$call == reference
   if ( variant=='' ) {
     variant = unique(c(defaultVariant, as.character(pileup$call[!ref])))
@@ -556,7 +583,7 @@ QCsnp = function(pileup, reference, x, variant='', defaultVariant='') {
 
   if (varN == 1) flag = paste0(flag, 'Svr')
   if (refN == 1) flag = paste0(flag, 'Srr')
-
+  
   ret = data.frame('x'=x, 'reference'=reference, 'variant'=variant, 'cov'=cov, 'ref'=refN, 'var'=varN,
     'pbq'=pbq, 'pmq'=pmq, 'psr'=psr, 'RIB'=RIB, 'flag'=flag, stringsAsFactors=F)
   if ( any(is.na(as.matrix(ret))) ) {
@@ -612,10 +639,6 @@ inGene = function(SNPs, genes, noHit = NA, genome='hg19') {
 
 
 
-
-
-
-
 #Takes the sample variants and normal bam files and capture regions.
 #return the variant information for the normals on the positions that the samples are called on.
 getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, BQoffset, dbDir, Rdirectory, plotDirectory, cpus, forceRedoSNPs=F, forceRedoVariants=F) {
@@ -633,6 +656,7 @@ getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, 
     variants = lapply(bamFiles, function(file) {
       QCsnps(pileups=importQualityScores(SNPs, file, BQoffset, genome=genome, cpus=cpus)[[1]], SNPs=SNPs, cpus=cpus)})
     names(variants)=names
+    variants = lapply(variants, function(q) q[apply(!is.na(q), 1, any),])
     variants = shareVariants(variants)
     
     for ( i in 1:length(variants) )  variants[[i]]$db = SNPs[as.character(variants[[i]]$x),]$db
@@ -654,12 +678,18 @@ getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, 
                           log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
         dev.off()
       }
-      png(paste0(FreqDirectory, sample, '-hist.png'), height=2000, width=4000, res=144)
-      hist(variants[[sample]]$var/variants[[sample]]$cov, breaks=(0:100)/100, col=mcri('blue'))
-      dev.off()
+      use = variants[[sample]]$var > 0
+      if ( any(use) ) {
+        png(paste0(FreqDirectory, sample, '-hist.png'), height=2000, width=4000, res=144)
+        hist(variants[[sample]]$var[use]/variants[[sample]]$cov[use], breaks=(0:100)/100, col=mcri('blue'))
+        dev.off()
+      }
     }
-    catLog('done.\n')  
+    catLog('done.\n')
   }
   
   return(list(SNPs=SNPs, variants=variants))
 }
+
+
+

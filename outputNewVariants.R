@@ -48,6 +48,16 @@ newVariants = function(q1, q2, SNPs, genome, cpus=1, ps=NA) {
   cut = 1/sum(low)^0.75
   Nprint = sum(ps[use] <= cut) + 10
   toReturn = use[order(ps[use])][1:Nprint]
+  severity =
+    if ( 'severity' %in% names(q1) & 'severity' %in% names(q2) )
+      pmin(q1$severity[toReturn], q2$severity[toReturn])
+    else
+      rep('na', nrow(q1[toReturn,]))
+  effect =
+    if ( 'type' %in% names(q1) & 'type' %in% names(q2) )
+      ifelse(q1$type[toReturn] == 'notChecked', q2$type[toReturn], q1$type[toReturn])
+    else
+      rep('na', nrow(q1[toReturn,]))
   ret = data.frame(
     chr=xToChr(q1$x[toReturn], genome),
     start=xToPos(q1$x[toReturn], genome),
@@ -55,6 +65,8 @@ newVariants = function(q1, q2, SNPs, genome, cpus=1, ps=NA) {
     reference=q1$reference[toReturn],
     variant=q1$variant[toReturn],
     inGene=SNPs[as.character(q1$x[toReturn]),]$inGene,
+    severity=severity,
+    effect= effect,
     f1=q1$var[toReturn]/q1$cov[toReturn],
     f2=q2$var[toReturn]/q2$cov[toReturn],
     cov1=q1$cov[toReturn],
@@ -73,7 +85,12 @@ newVariants = function(q1, q2, SNPs, genome, cpus=1, ps=NA) {
     pmq2=q2$pmq[toReturn],
     psr1=q1$psr[toReturn],
     psr2=q2$psr[toReturn],
+    dbSNP=ifelse(q1$db[toReturn], 'YES', ''),
+    germlineLike=ifelse(is.na(q1$germline[toReturn]), 'na', ifelse(q1$germline[toReturn], 'YES', '')),
     row.names=rownames(q1)[toReturn])
+  if ( 'severity' %in% names(q1) ) ord = order(q1$severity[toReturn] + 10*q1$germline[toReturn])
+  else ord = order(10*q1$germline[toReturn])
+  ret = ret[ord,]
   return(ret)
 }
 

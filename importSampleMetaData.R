@@ -36,7 +36,7 @@ metaToTimeSeries = function(names, individuals, normals) {
   series = list()
   for (individual in unique(individuals)) {
     rows = which(individual == individuals)
-    if ( length(rows) < 3 ) next
+    if ( length(rows) < 2 ) next
     series = c(series, list(names[rows]))
     names(series)[length(series)] = individual
   }

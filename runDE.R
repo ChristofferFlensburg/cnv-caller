@@ -93,15 +93,8 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   }
 
   catLog('Setting up design matrix for linear analysis..')
-  group = c(names, rep('normal', length(externalNormalBams)))
-  if ( sum(sex[group == 'normal'] == 'male') > 1 & sum(sex[group == 'normal'] == 'female') > 1 ) {
-    design = model.matrix(~0+group+sex)
-    catLog('Got enough normals of both sexes, will sex-match normals..')
-  }
-  else {
-    design = model.matrix(~0+group)
-    catLog('Not enough normals of both sexes, will not sex-match normals..')
-  }
+  group = c(names, paste0(rep('normal', length(externalNormalBams))))
+  design = model.matrix(~0+group)
   colnames(design) = gsub('^group', '', gsub('^sex', '',colnames(design)))
   contrastList = c(lapply(names, function(name) paste0(name, '-normal')), list(levels=colnames(design)))
   contrasts = do.call(makeContrasts, contrastList)
@@ -125,19 +118,43 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
       dev.off()
     }
   }
-  catLog('done.\n')  
+  catLog('done.\n')
+
+  countsOri = counts
+  catLog('Correcting for sex chromsome coverage..')
+  sexCorrectionFactor = list()
+  #multiply male coverage by 2 over the x chromsome in the normal samples
+  sexRows = 1:nrow(counts) %in% c(xes, yes)
+  for (i in 1:ncol(counts)) {
+    col = colnames(counts)[i]
+    if ( sex[col] == 'male' ) {
+      nonSexReads = sum(counts[!sexRows,col])
+      sexReads = sum(counts[sexRows,col])
+      normalisationFactor = (nonSexReads+sexReads)/(nonSexReads+2*sexReads)
+      sexCorrectionFactor[[i]] = ifelse(sexRows, 2*normalisationFactor, normalisationFactor)
+    }
+    else sexCorrectionFactor[[i]] = rep(1, nrow(counts))
+  }
+  sexCorrectionFactor = do.call(cbind, sexCorrectionFactor)
+  countsSex = counts*sexCorrectionFactor
+  catLog('done.\n')
 
   #loess normalise normals, then match the non-normal M-A dependence to the normals.
   #This is not needed for most samples, but will really improve accuracy when there is an M-A bias.
   catLog('Loess normalising counts to normals..')
+  counts = countsSex
   counts[,group=='normal'] = loessNormAll(counts[,group=='normal'], span=0.5)
   counts[,group=='normal'] = loessNormAll(counts[,group=='normal'], span=0.5)
   counts[,group!='normal'] = loessNormAllToReference(counts[,group!='normal'], counts[,group=='normal'], span=0.5)
   counts[,group!='normal'] = loessNormAllToReference(counts[,group!='normal'], counts[,group=='normal'], span=0.5)
+  loessCorrectionFactor = (0.5+counts)/(0.5+countsSex)
+  countsSexLo = counts
   catLog('done.\n')
 
   #gc correcting
-  catLog('Correcting gc bias..')
+  catLog('Correcting for GC bias..')
+  GCdirectory = paste0(diagnosticPlotsDirectory, '/GCplots/')
+  if ( !file.exists(GCdirectory) ) dir.create(GCdirectory)
   genes = rownames(counts)
   regionNames = captureRegions$region
   gc = as.numeric(captureRegions$gc)
@@ -147,32 +164,71 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
     if ( length(is) == 0 ) return(0)
     return(sum(gc[is]*widths[is])/sum(widths[is]))
   })
-  correctionFactor = list()
-  GCdirectory = paste0(diagnosticPlotsDirectory, '/GCplots/')
-  if ( !file.exists(GCdirectory) ) dir.create(GCdirectory)
+  GCcorrectionFactor = list()
+  GCdirectory = 
   for (i in 1:ncol(counts)) {
     col = colnames(counts)[i]
     catLog(col, '..', sep='')
-    lo = loess(cov~gc, data=data.frame(cov=log((1+counts[,col])/(annotation$Length)), gc=gc),
+    lo = loess(cov~gc, data=data.frame(cov=log((0.5+counts[,col])/(annotation$Length)), gc=gc),
       weights=noneg(annotation$Length-100), span=0.3, family='symmetric', degrees=1)
     los = exp(predict(lo, gc))
-    correctionFactor[[i]] = pmin(10, pmax(0.1, (1/los)/mean(1/los)))
-    correctionFactor[[i]] = correctionFactor[[i]]*sum(counts[,col])/sum(counts[,col]*correctionFactor[[i]])
+    GCcorrectionFactor[[i]] = pmin(10, pmax(0.1, (1/los)/mean(1/los)))
+    GCcorrectionFactor[[i]] = GCcorrectionFactor[[i]]*sum(counts[,col])/sum(counts[,col]*GCcorrectionFactor[[i]])
     plotfile = paste0(GCdirectory, col, '.png')
     if ( !file.exists(plotfile) | forceRedoFit ) {
       png(plotfile, height=2000, width=4000, res=144)
-      plotColourScatter(gc, (counts[,col]/(annotation$Length)), ylim=c(0,2), cex=pmin(3,sqrt(annotation$Length/1000))*1.5, main=col, xlab='GC content', ylab='reads/bp', verbose=F)
+      plotColourScatter(gc, ((0.5+counts[,col])/(annotation$Length)), ylim=c(0,2),
+                        cex=pmin(3,sqrt(noneg(annotation$Length-100)/1000))*1.5,
+                        main=col, xlab='GC content', ylab='reads/bp', verbose=F)
       lines((0:100)/100, exp(predict(lo, (0:100)/100)), lwd=5, col=mcri('orange'))
       legend('topleft', 'loess fit', lwd=5, col=mcri('orange'))
       dev.off()
     }
   }
-  correctionFactor = do.call(cbind, correctionFactor)
+  GCcorrectionFactor = do.call(cbind, GCcorrectionFactor)
+  countsSexLoGC = countsSexLo*GCcorrectionFactor
+  catLog('done!\n')
+
+  #loess correct the GC corrected counts
+  catLog('Second round of loess normalisation..')
+  counts = countsSexLoGC
+  counts[,group=='normal'] = loessNormAll(counts[,group=='normal'], span=0.5)
+  counts[,group=='normal'] = loessNormAll(counts[,group=='normal'], span=0.5)
+  counts[,group!='normal'] = loessNormAllToReference(counts[,group!='normal'], counts[,group=='normal'], span=0.5)
+  counts[,group!='normal'] = loessNormAllToReference(counts[,group!='normal'], counts[,group=='normal'], span=0.5)
+  loessCorrectionFactor2 = (0.5+counts)/(0.5+countsSexLoGC)
+  countsSexLoGCLo = counts
   catLog('done.\n')
 
+
+  catLog('Returning sex effects to non-normal samples..')
+  #divide back male coverage by 2 over the x chromsome in the (non-normal) samples
+  returnSampleSexCorrectionFactor = list()
+  sexRows = 1:nrow(counts) %in% c(xes, yes)
+  for (i in 1:ncol(counts)) {
+    col = colnames(counts)[i]
+    if ( sex[col] == 'male' & i <= length(names) ) {
+      returnSampleSexCorrectionFactor[[i]] = ifelse(sexRows, 1/2, 1)
+    }
+    else returnSampleSexCorrectionFactor[[i]] = rep(1, nrow(counts))
+  }
+  returnSampleSexCorrectionFactor = do.call(cbind, returnSampleSexCorrectionFactor)
+  countsSexLoGCLoSex = countsSexLoGCLo*returnSampleSexCorrectionFactor
+  counts = countsSexLoGCLoSex
+  catLog('done.\n')
+
+  improvement = c()
+  for ( col1 in (length(names)+1):(ncol(counts)-1) ) {
+    for ( col2 in (col1+1):ncol(counts) ) {   
+      corVar = exp(sqrt(mean(log((0.5+libNorm(counts)[!sexRows,col1])/(0.5+libNorm(counts)[!sexRows,col2]))^2)))
+      var = exp(sqrt(mean(log((0.5+libNorm(countsOri)[!sexRows,col1])/(0.5+libNorm(countsOri)[!sexRows,col2]))^2)))
+      print(c(var-1, corVar-1))
+      improvement = c(improvement, (corVar-1)/(var-1))
+    }
+  }
+  catLog('Corrections changes average LFC between sample by a factor ', round(mean(improvement) ,4),'.\n')
+
   #MA plots after loess and GC correction
-  diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
-  if ( !file.exists(diagnosticPlotsDirectory) ) dir.create(diagnosticPlotsDirectory)
   catLog('Making MA plots of coverage after loess and GC correction in diagnostics directory..')
   normalMean = rowMeans(counts[,group=='normal'])
   MAdirectory = paste0(diagnosticPlotsDirectory, '/MAplotsAfter/')
@@ -182,19 +238,26 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
     plotfile = paste0(MAdirectory, col, '.png')
     if ( !file.exists(plotfile) | forceRedoFit ) {
       png(plotfile, height=2000, width=4000, res=144)
-      plotMA(counts[,col], normalMean, loess=T, span=0.5, verbose=F, main = paste0(col, ' vs normals (before loess normalisation)'))
+      plotMA(counts[,col], normalMean, loess=T, span=0.5, verbose=F, main = paste0(col, ' vs normals (after corrections)'))
       dev.off()
     }
   }
   catLog('done.\n')  
 
 
+  #remove Y counts if no normal sample is male.
+  if ( !any(sex[group=='normal'] == 'male') ) {
+    counts = counts[-yes,]
+    xes = grep('X$', annotation$Chr[-yes])
+    yes = grep('Y$', annotation$Chr[-yes])
+  }
 
   catLog('Running voom..')
   jpeg(paste0(diagnosticPlotsDirectory, '/voomVariance.jpg'), height=1000, width=2000)
-  voomWeights = voom(counts, design=design, plot=T)
+  voomWeights = voom(countsOri, design=design, plot=T)
+  voomWeights$weights[yes,design[,'normal']==1 & sex == 'female'] = 0
   dev.off()
-  voomCounts = voom(counts*correctionFactor, design=design)
+  voomCounts = voom(counts, design=design, plot=F)
   voomCombined = voomCounts
   voomCombined$weights = voomWeights$weights
   catLog('limma..')
@@ -203,7 +266,7 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   fitP = contrasts.fit(fitP, contrasts)
   fitP = eBayes(fitP)
   catLog('XRank..')
-  fitP = XRank(fitP, plot=F, cpus=cpus, verbose=F)
+  fitP = XRank(fitP, plot=F, cpus=cpus, verbose=T)
   fitP$x = annotationToX(annotation, genome=genome)
   x1x2 = annotationToX1X2(annotation, genome=genome)
   fitP$x1 = x1x2[,1]
@@ -219,6 +282,9 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   names(tots) = names(assigned) = names
   fitP$totNReads = tots
   fitP$assignedNReads = assigned
+  sex = sex[1:ncol(fitP)]
+  names(sex) = colnames(fitP)
+  fitP$sex = sex
   catLog('done.\n')
   
   catLog('Saving fit of dimension', dim(fitP), '..')
@@ -258,9 +324,9 @@ loessNormAllToReference = function(counts, reference, ...) {
   return(newCounts)
 }
 loessNorm = function(counts1, counts2, span=0.5) {
-  if ( is.matrix(counts1) ) x = 1 + rowSums(counts1)
+  if ( is.matrix(counts1) ) x = rowSums(1+counts1)
   else x = 1 + counts1
-  if ( is.matrix(counts2) ) y = 1 + rowSums(counts2)
+  if ( is.matrix(counts2) ) y = rowSums(1+counts2)
   else y = 1 + counts2
   M = log(x/y)
   A = log(x*y)/2
@@ -270,12 +336,12 @@ loessNorm = function(counts1, counts2, span=0.5) {
 
   counts1 = counts1*exp(-loM/2)
   counts2 = counts2*exp(loM/2)
-  return(round(cbind(counts1, counts2)))
+  return(cbind(counts1, counts2))
 }
 loessNormToReference = function(counts1, reference, span=0.5) {
-  if ( is.matrix(counts1) ) x = 1 + rowSums(counts1)
+  if ( is.matrix(counts1) ) x = rowSums(1+counts1)
   else x = 1 + counts1
-  if ( is.matrix(reference) ) y = 1 + rowSums(reference)
+  if ( is.matrix(reference) ) y = rowSums(1+reference)
   else y = 1 + reference
   M = log10(x/y)
   A = log10(x*y)/2
@@ -284,7 +350,7 @@ loessNormToReference = function(counts1, reference, span=0.5) {
   loM = loM - sum(loM*10^(A))/sum(10^(A))
 
   counts1 = counts1*10^(-loM)
-  return(round(counts1))
+  return(counts1)
 }
 
 #helper functions that extracts information from annotation objects.
@@ -355,12 +421,12 @@ plotMA = function(x, y, col=mcri('darkblue'), libNorm = F, span=0.2,
 #Otherwise returns the input. Call without argument to see available colours
 mcri = function(col=0, al=1) {
   if ( col[1] == 0 ) {
-    cat('Use: mcri(\'colour\'), returning an official MCRI colour.\nAvailable MCRI colours are:\n\ndarkblue\nblue\nlightblue\nazure\ngreen\norange\nviolet\ncyan\nred\nmagenta (aka rose).\n\nReturning default blue.\n')
+    cat('Use: mcri(\'colour\'), returning an official MCRI colour.\nAvailable MCRI colours are:\n\ndarkblue\nblue\nlightblue\nazure\ngreen\norange\nviolet\ncyan\nred\ndarkred\nmagenta (aka rose).\n\nReturning default blue.\n')
     return(mcri('blue'))
   }
   if ( length(col) > 1 ) return(sapply(col, function(c) mcri(c, al)))
   if ( is.numeric(col) ) {
-    col = (col %% 8) + 1
+    col = (col %% 9) + 1
     if ( col == 1 ) col = 'blue'
     else if ( col == 2 ) col = 'orange'
     else if ( col == 3 ) col = 'green'
@@ -369,6 +435,7 @@ mcri = function(col=0, al=1) {
     else if ( col == 6 ) col = 'red'
     else if ( col == 7 ) col = 'violet'
     else if ( col == 8 ) col = 'darkblue'
+    else if ( col == 9 ) col = 'darkred'
     else col = 'black'
   }
   ret = 0
@@ -381,6 +448,7 @@ mcri = function(col=0, al=1) {
   if ( col == 'violet') ret = rgb(122/255, 82/255, 199/255, al)  
   if ( col == 'cyan') ret = rgb(0/255, 183/255, 198/255, al)  
   if ( col == 'red') ret = rgb(192/255, 80/255, 77/255, al)  
+  if ( col == 'darkred') ret = rgb(96/255, 40/255, 38/255, al)  
   if ( col == 'magenta' | col == 'rose') ret = rgb(236/255, 0/255, 140/255, al)
   if ( ret == 0 ) ret = do.call(rgb, as.list(c(col2rgb(col)/255, al)))
   return(ret)

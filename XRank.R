@@ -126,41 +126,26 @@ GLFC = function(fit, pval = 0.1, mode='t', priors='empirical', FDR = F,
 
 #This function calculates the prior from the data supplied in the fit object.
 #The bins are denser around LFC = 0, so default number of bins should be enough.
-getPriors = function(fit, coefs = 0, nbins = 50, plot=T) {
+getPriors = function(fit, coefs = 0, nbins = 50, plot=T, mode='empirical') {
   #if no coefficients specified, get priors for all.
   if ( length(coefs) == 1 && coefs == 0 ) coefs = colnames(fit$coefficients)
   N = length(coefs)
 
   #find maximum LFC, to know the range to take data over.
-  #range = list()
-  #for (i in 1:N) range[[i]] = 1.1*max(abs(fit$coefficients[,coefs[i]]))
-
   range = lapply(coefs, function(coef) 1.1*max(abs(fit$coefficients[,coef])))
   names(range) = coefs
 
   #Set the breaks for the bins in the histogram.
   #Smaller bins close to 0, where accuracy is more important,
   #and density is higher
-  #breaks = list()
-  #for ( i in 1:N )
-  #  breaks[[i]] = (((-nbins):(nbins))/nbins)^2*
-  #    sign((-nbins):(nbins))*range[[i]]
-
   breaks = lapply(coefs, function(coef)
     (((-nbins):(nbins))/nbins)^2*sign((-nbins):(nbins))*range[[coef]] )
   names(breaks) = coefs
 
   #Now get the histograms, which will be the priors
-  #priors = list()
-  #for ( i in 1:N ) priors[[i]] = hist(fit$coefficients[,coefs[i]],
-  #                         breaks = breaks[[i]], plot=plot)
-
   priors = lapply(coefs, function(coef) {
-    if ( plot )
-      hist(fit$coefficients[,coef], breaks = breaks[[coef]],
-           main=coef, xlab='measured LFC')
-    else
-      hist(fit$coefficients[,coef], breaks = breaks[[coef]], plot=F)
+    if ( mode == 'posterior' & 'best.guess' %in% names(fit) ) hist(fit$best.guess[,coef], breaks = breaks[[coef]], plot=plot)
+    else hist(fit$coefficients[,coef], breaks = breaks[[coef]], plot=plot)
   })
   names(priors) = coefs
 
@@ -254,8 +239,8 @@ GR = function(r, d=0.1, p=0.1, prior = 'flat', mode='normal',
 #This function plots the p-values (x) against the LFCs (y).
 #The largest 'print' positive and negative GLFCs can be marked by their gene
 #names in the fit object if desired.
-plotVolcano = function(fit, coef=1, print = 20, main = NA, shrink=T,
-  xlab='corrected LFC', ylab='-log10(p-value)', LFC=T, specialGenes=c(), ...) {
+plotVolcano = function(fit, coef=1, print = 20, main = NA, shrink=T, line='nGenes',
+  xlab='corrected LFC', ylab='-log10(p-value)', specialGenes=c(), col='red', ...) {
   #get the name of the column if only index provided
   if ( is.numeric(coef) ) coef = colnames(fit)[coef]
   print=min(print, nrow(fit))
@@ -272,10 +257,15 @@ plotVolcano = function(fit, coef=1, print = 20, main = NA, shrink=T,
   
   #plot the points and segments
   plot(1, type='n', xlim = xlim, ylim=c(0, max(-log10(ps))), xlab=xlab, ylab=ylab, main = main, ...)
-  segments( 2*xlim[1], log10(nrow(fit)), 2*xlim[2], log10(nrow(fit)), cex=0.5, col='orange', lty=2)
+  if ( line == 'nGenes' ) segments( 2*xlim[1], log10(nrow(fit)), 2*xlim[2], log10(nrow(fit)), cex=1, col='orange', lty=2)
+  if ( line == 'fdr' ) {
+    fdr = p.adjust(ps, method='fdr')
+    cut = -log10(max(ps[fdr <= 0.05]))
+    segments(2*xlim[1], cut, 2*xlim[2], cut, cex=1, col='orange', lty=2)
+  }
   segments(bgs, -log10(ps), cos, -log10(ps), cex=0.4, col=rgb(0,0,0,0.15))
   points(cos, -log10(ps), pch=16, cex=0.5)
-  points(bgs, -log10(ps), pch=16, cex=0.7, col='red')
+  points(bgs, -log10(ps), pch=16, cex=0.7, col=col)
 
   legend('bottomright', c('measured', 'best guess'), pch=16, pt.cex=c(0.5, 0.8), col=c('black', 'red'))
 
@@ -478,7 +468,13 @@ posteriors = function(fit, mode='t', priors='empirical', FDR = F,
   if ( is.character(priors) && priors == 'empirical' ) {
     #call the emprical prior function.
     if ( !quiet ) cat('Preparing empirical priors... ')
-    priors = getPriors(fit, coefs = coefs, plot=plot)
+    priors = getPriors(fit, coefs = coefs, plot=plot, mode='empirical')
+    if ( !quiet ) cat('done.\n')
+  }
+  else if ( is.character(priors) && priors == 'posterior' ) {
+    #call the emprical prior function.
+    if ( !quiet ) cat('Preparing empirical priors... ')
+    priors = getPriors(fit, coefs = coefs, plot=plot, mode='posterior')
     if ( !quiet ) cat('done.\n')
   }
   else if ( is.character(priors) && priors == 'flat' ) {
@@ -620,13 +616,10 @@ DEposterior = function(fit, coef, wbreaks=10, FDRcut = 0.5) {
   minC = min(fit$coefficients[,coef])
   maxC = max(fit$coefficients[,coef])
   nx = 100
-  #xbreaks = seq(from = minC - (maxC-minC)/nx, to = maxC + (maxC-minC)/nx,
- #   by = (maxC-minC)/(nx-2))
   x = (xbreaks[1:(length(xbreaks)-1)] + xbreaks[2:length(xbreaks)])/2
   null = getPriorNullDeviation(fit, xbreaks, wbreaks=wbreaks)[[coef]]
 
   ws = fit$coefficients[,coef]/fit$t[,coef]
-  #wbreaks = unique(quantile(ws, seq(0, 1, 1/wbreaks)))
   wbreaks = getWBreaks(ws, wbreaks)
   
   wHist = hist(ws, breaks=wbreaks)
@@ -764,12 +757,27 @@ plotPost = function(posts, i, truth=F, BG=F) {
   legend('topleft', c('meas', 'truth', 'BG'), col=c(mcri('blue'), mcri('red'), mcri('green')), lwd=2)
 }
 
+#helper function that returns the mcri version of the provided colour(s) if available
+#Otherwise returns the input. Call without argument to see available colours
 mcri = function(col=0, al=1) {
   if ( col[1] == 0 ) {
-    cat('Use: mcri(\'colour\'), returning an official MCRI colour.\nAvailable MCRI colours are:\n\ndarkblue\nblue\nlightblue\nazure\ngreen\norange\nviolet\ncyan\nred\nmagenta (aka rose).\n\nReturning default blue.\n')
+    cat('Use: mcri(\'colour\'), returning an official MCRI colour.\nAvailable MCRI colours are:\n\ndarkblue\nblue\nlightblue\nazure\ngreen\norange\nviolet\ncyan\nred\ndarkred\nmagenta (aka rose).\n\nReturning default blue.\n')
     return(mcri('blue'))
   }
   if ( length(col) > 1 ) return(sapply(col, function(c) mcri(c, al)))
+  if ( is.numeric(col) ) {
+    col = (col %% 9) + 1
+    if ( col == 1 ) col = 'blue'
+    else if ( col == 2 ) col = 'orange'
+    else if ( col == 3 ) col = 'green'
+    else if ( col == 4 ) col = 'magenta'
+    else if ( col == 5 ) col = 'cyan'
+    else if ( col == 6 ) col = 'red'
+    else if ( col == 7 ) col = 'violet'
+    else if ( col == 8 ) col = 'darkblue'
+    else if ( col == 9 ) col = 'darkred'
+    else col = 'black'
+  }
   ret = 0
   if ( col == 'darkblue') ret = rgb(9/255, 47/255, 94/255, al)
   if ( col == 'blue') ret = rgb(0, 83/255, 161/255, al)
@@ -780,6 +788,7 @@ mcri = function(col=0, al=1) {
   if ( col == 'violet') ret = rgb(122/255, 82/255, 199/255, al)  
   if ( col == 'cyan') ret = rgb(0/255, 183/255, 198/255, al)  
   if ( col == 'red') ret = rgb(192/255, 80/255, 77/255, al)  
+  if ( col == 'darkred') ret = rgb(140/255, 39/255, 30/255, al)  
   if ( col == 'magenta' | col == 'rose') ret = rgb(236/255, 0/255, 140/255, al)
   if ( ret == 0 ) ret = do.call(rgb, as.list(c(col2rgb(col)/255, al)))
   return(ret)
@@ -806,14 +815,14 @@ XRank = function(fit, coefs = 0, verbose=F, plot=F, cpus=5) {
   if ( coefs == 0 ) coefs = colnames(fit)
   if ( is.numeric(coefs) ) coefs = colnames(fit)[coefs]
   require(parallel)
-  posts = posteriors(fit, coefs = coefs, quiet= !verbose, plot=plot, cpus=cpus)
+  posts = posteriors(fit, coefs = coefs, quiet= !verbose, plot=plot, cpus=cpus, prior='empirical')
   ranks = postRank(posts, quiet = !verbose, cpus=cpus)
 
   fit$posterior = posts$data
   fit$prior = posts$prior
   fit$XRank = as.matrix(ranks$XRank)
   fit = bestGuess(fit, coefs = coefs, quiet = !verbose, cpus=cpus)
-
+  
   if ( plot )  {
     n = length(fit$prior)
     m = round(sqrt(n))
