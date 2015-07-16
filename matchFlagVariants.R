@@ -3,7 +3,7 @@
 #flags variants with suspicious behaviour in the normals.
 #marks the somatic-looking variants in the samples
 #ie non-db variants that are not present in the normals and not flagged as suspicious.
-matchFlagVariants = function(variants, normalVariants, individuals, normals, Rdirectory, forceRedoMatchFlag=F) {
+matchFlagVariants = function(variants, normalVariants, individuals, normals, Rdirectory, cpus=1, forceRedoMatchFlag=F) {
   saveFile = paste0(Rdirectory, '/allVariants.Rdata')
   if ( file.exists(saveFile) & !forceRedoMatchFlag ) {
     catLog('Loading final version of combined variants.\n')
@@ -12,13 +12,13 @@ matchFlagVariants = function(variants, normalVariants, individuals, normals, Rdi
     setVariantLoss(allVariants$normalVariants$variants)
     return(allVariants)
   }
-  variants$variants = lapply(variants$variants, function(q) q[apply(!is.na(q), 1, any),])
-  normalVariants$variants = lapply(normalVariants$variants, function(q) q[apply(!is.na(q), 1, any),])
+  variants$variants = lapply(variants$variants, function(q) q[!is.na(q$cov),])
+  normalVariants$variants = lapply(normalVariants$variants, function(q) q[!is.na(q$cov),])
   variants = matchVariants(variants, normalVariants)
   normalVariants = matchVariants(normalVariants, variants)
 
   #remove boring variants
-  present = rowSums(sapply(variants$variants, function(q) q$var > q$cov*0.05)) > 0
+  present = rowsums(sapply(variants$variants, function(q) q$var > q$cov*0.05)) > 0
   catLog('Keeping ', sum(present), ' out of ', length(present),
          ' (', round(sum(present)/length(!present), 3)*100, '%) SNVs that are present at 5% frequency in at least one sample.\n', sep='')
   variants$variants = lapply(variants$variants, function(q) q[present,])
@@ -42,16 +42,25 @@ matchFlagVariants = function(variants, normalVariants, individuals, normals, Rdi
 
 #helper function that ensures that the first variants object have all the variants.
 matchVariants = function(vs1, vs2) {
-  catLog('Matching variants..')      
-  vs1Vars = rownames(vs1$variants[[1]])
-  vs2Vars = rownames(vs2$variants[[1]])
+  catLog('Matching variants..')
+  vs1$variants = matchInternalQs(vs1$variants)
+  vs2$variants = matchInternalQs(vs2$variants)
+  vs1$variants = matchQs(vs1$variants, vs2$variants)
+  vs1$SNPs = shareSNPs(vs1$SNPs, vs2$SNPs)
+  vs1$SNPs = vs1$SNPs[order(vs1$SNPs$x, vs1$SNPs$variant),]
+  catLog('done.\n')
+  return(vs1)
+}
+matchQs = function(qs1, qs2) {
+  vs1Vars = rownames(qs1[[1]])
+  vs2Vars = rownames(qs2[[1]])
   newV1 = setdiff(vs2Vars, vs1Vars)
   catLog(length(vs1Vars) , 'and', length(vs2Vars), 'combine to', length(vs1Vars)+length(newV1), 'variants..')
   is = which(vs2Vars %in% newV1)
   newVars = data.frame(
-    x = as.numeric(gsub('[AGNTCagtcn+-].*$', '', newV1)),
-    reference = vs2$variants[[1]]$reference[is],
-    variant = vs2$variants[[1]]$variant[is],
+    x = qs2[[1]]$x[is],
+    reference = qs2[[1]]$reference[is],
+    variant = qs2[[1]]$variant[is],
     cov = rep(0, length(is)),
     ref = rep(0, length(is)),
     var = rep(0, length(is)),
@@ -60,22 +69,55 @@ matchVariants = function(vs1, vs2) {
     psr = rep(1, length(is)),
     RIB = rep(1, length(is)),
     flag = rep('', length(is)),
-    db = vs2$variants[[1]]$db[is],
-    somaticP = rep(1, length(is)),
+    db = qs2[[1]]$db[is],
+    dbValidated = if ( 'dbValidated' %in% names(qs2[[1]]) ) qs2[[1]]$dbValidated[is]
+    else rep(NA, length(is)),
+    dbMAF = if ( 'dbMAF' %in% names(qs2[[1]]) ) qs2[[1]]$dbMAF[is]
+    else rep(NA, length(is)),
+    somaticP = rep(0, length(is)),
+    germline = rep(FALSE, length(is)),
+    type = if ( 'type' %in% names(qs2[[1]]) ) qs2[[1]]$type[is]
+    else rep('notChecked', length(is)),
+    severity = if ( 'type' %in% names(qs2[[1]]) ) qs2[[1]]$severity[is]
+    else rep(100, length(is)),
     row.names = newV1)
-
-  #make sure all the columns are in place
-  for ( col in setdiff(names(newVars), names(vs1$variants[[1]])) ) {
+  
+  #make sure the new variants have the columns of qs2 and qs1
+  for ( col in setdiff(union(names(qs1[[1]]), names(qs2[[1]])), names(newVars)) ) {
     catLog('adding ', col, '..', sep='')
-    vs1$variants = lapply(vs1$variants, function(q) {q[[col]] = NA; return(q)})
+    newVars[[col]] = rep(NA, nrow(newVars))
   }
-  vs1$variants = lapply(vs1$variants, function(q) rbind(q, newVars))
-  vs1$variants = lapply(vs1$variants, function(q) q[order(q$x, q$variant),])
-  vs1$SNPs = shareSNPs(vs1$SNPs, vs2$SNPs)
-  vs1$SNPs = vs1$SNPs[order(vs1$SNPs$x, vs1$SNPs$variant),]
-  catLog('done.\n')
-  return(vs1)
+  #then make sure qs1 have the columns of the new variants (which will include qs2)
+  for ( col in setdiff(names(newVars), names(qs1[[1]])) ) {
+    catLog('adding ', col, '..', sep='')
+    qs1 = lapply(qs1, function(q) {q[[col]] = rep(NA, nrow(q)); return(q)})
+  }
+  #we are now ready to rbind the data frames
+  qs1 = lapply(qs1, function(q) rbind(q, newVars))
+  qs1 = lapply(qs1, function(q) q[order(q$x, q$variant),])
+  return(qs1)
 }
+
+#makes sure all variant data frames in the list qs has all the rows
+#if not available, a token entry with coverage 0 is used.
+matchInternalQs = function(qs) {
+  catLog('Matching variants between individuals..')
+  if ( length(qs) < 2 ) return(qs)
+  catLog('Matching first sample to sample..')
+  for ( i in 2:length(qs) ) {
+    catLog(i, '..', sep='')
+    qs[1] = matchQs(qs[1], qs[i])
+  }
+  catLog('done.\n')
+  catLog('Mathcing to first sample from sample..')
+  for ( i in 2:length(qs) ) {
+    catLog(i, '..', sep='')
+    qs[i] = matchQs(qs[i], qs[1])
+  }
+  catLog('done.\n')
+return(qs)
+}
+
 
 #helper function that flags variants that have suspicious behaviour in the pool of normals.
 flagFromNormals = function(variants, normalVariants, cpus=1) {
@@ -84,32 +126,33 @@ flagFromNormals = function(variants, normalVariants, cpus=1) {
   varN = do.call(cbind, lapply(normalVariants$variants, function(q) q$var))
   covN = do.call(cbind, lapply(normalVariants$variants, function(q) q$cov))
   flags = do.call(cbind, lapply(normalVariants$variants, function(q) q$flag))
-  unflagged = rowSums(flags == '') == ncol(flags)
+  unflagged = rowsums(flags == '') == ncol(flags)
   db = normalVariants$variants[[1]]$db
-  f = rowSums(varN)/rowSums(covN)
-  f[rowSums(covN) == 0] = 0
+  f = rowsums(varN)/rowsums(covN)
+  f[rowsums(covN) == 0] = 0
   fs = varN/covN
   fs[covN == 0] = 0  
   psN = matrix(pBinom(as.integer(covN), as.integer(varN), rep(f, ncol(covN))), ncol=ncol(covN))
   pSameF = apply(psN, 1, fisherTest)[2,]
-  non0 = f > 0.05 & rowMeans(varN) > 1
+  non0 = f > 0.03 & rowsums(varN) > 1
   isLow = fs < 0.1
   isHigh = fs > 0.9
   isHalf = matrix(pBinom(as.integer(covN), as.integer(varN), rep(refBias(0.5), nrow(covN)*ncol(covN))), ncol=ncol(covN)) > 0.01
-  consistent = rowSums(isLow | isHigh | isHalf) == ncol(fs)   #are all samples 0, 0.5 or 1?
+  consistent = rowsums(isLow | isHigh | isHalf) == ncol(fs)   #are all samples 0, 0.5 or 1?
   normalNoise = (!db & non0 & pSameF > 0.01) | (db & non0 & pSameF > 0.01 & !consistent)
   catLog('Flagged', sum(normalNoise), 'out of', nrow(fs),
          'variants that are recurrently and consistently noisy in normals.\n')
 
   present = fs > 0.2 & covN >= 10
-  variableNormal = (!normalNoise & rowSums(present) > 0 & !db) | (!normalNoise & non0 & !consistent & db)
+  variableNormal = (!normalNoise & rowsums(present) > 0 & !db) | (!normalNoise & non0 & !consistent & db)
   catLog('Flagged another', sum(variableNormal), 'out of', nrow(fs),
          'variants that are not db, but significantly present in at least on normal sample.\n')
 
   meanCov = rowmeans(covN)
-  manyCopies = meanCov > 10*median(meanCov[unflagged])
+  medianCov = median(meanCov[unflagged & meanCov >= 5])
+  manyCopies = meanCov > 10*medianCov
   catLog('Flagged another', sum(manyCopies), 'out of', nrow(fs),
-         'variants that are have a coverage ten times higher than median.\n')
+         'variants that have a coverage ten times higher than median', medianCov, ' in the normals.\n')
   
   #check if the variants are consistent with the normal noise frequency, and flag Nnc or Nnn.
   variants$variants =
@@ -126,9 +169,9 @@ flagFromNormals = function(variants, normalVariants, cpus=1) {
 
   #check for non-db SNPs that behave as polymoprhic db SNPs in the normals
   polymorphic = (!db &                                                   #db
-                 rowSums(isLow | isHigh | isHalf) == ncol(fs) &          #all consistent
-                 rowSums(isLow & !isHalf) > 0 &                          #one strictly ref 
-                 rowSums(!isLow & !isHigh & isHalf) > 0 &                #one strictly het
+                 rowsums(isLow | isHigh | isHalf) == ncol(fs) &          #all consistent
+                 rowsums(isLow & !isHalf) > 0 &                          #one strictly ref 
+                 rowsums(!isLow & !isHigh & isHalf) > 0 &                #one strictly het
                  pSameF < 0.01)                                          #not same frequency
   
   catLog('Flagged', sum(polymorphic), 'out of', sum(!db),
@@ -145,9 +188,23 @@ flagFromNormals = function(variants, normalVariants, cpus=1) {
   variants$variants =
     lapply(variants$variants, function(q) {
       flagX = q$x[q$flag != '' & q$flag != 'Nr']
-      inNoisyRegion = unlist(mclapply(q$x, function(x) sum(abs(flagX - x) < 100) >= 10 | sum(abs(flagX - x) < 200) >= 20 | sum(abs(flagX - x) < 300) >= 30 | sum(abs(flagX - x) < 1000) >= 50, mc.cores=cpus))
-      catLog(' ', sum(inNoisyRegion & q$flag == ''), sep='')
-      q$flag[inNoisyRegion] = paste0(q$flag[inNoisyRegion], 'Nr')
+      chrs = xToChr(flagX, genome)
+      for ( chr in unique(chrs) ) {
+        flagXchr = flagX[chrs == chr]
+        chrI = which(xToChr(q$x, genome) == chr)
+        inNoisyRegion = unlist(mclapply(q$x[chrI], function(x) {
+          within1000 = which(abs(flagXchr - x) < 1000)
+          within300 = which(abs(flagXchr[within1000] - x) < 300)
+          within200 = which(abs(flagXchr[within300] - x) < 200)
+          within100 = which(abs(flagXchr[within200] - x) < 100)
+          return(length(within100) >= 10 |
+                 length(within200) >= 20 |
+                 length(within300) >= 30 |
+                 length(within1000) >= 50)
+        }, mc.cores=cpus))
+        q$flag[chrI[inNoisyRegion]] = paste0(q$flag[chrI[inNoisyRegion]], 'Nr')
+      }
+      catLog(' ', sum(q$flag[chrI] == 'Nr'), sep='')      
       return(q)
     })
   catLog(' done.\n')
@@ -167,10 +224,10 @@ markSomatics = function(variants, normalVariants, individuals, normals, cpus=cpu
   #require consistent and very low frequency between normals.
   varN = do.call(cbind, lapply(normalVariants$variants, function(q) q$var))
   covN = do.call(cbind, lapply(normalVariants$variants, function(q) q$cov))
-  f = rowSums(varN)/rowSums(covN)
+  f = rowsums(varN)/rowsums(covN)
   fs = varN/covN
   fs[covN == 0] = 0  
-  f[rowSums(covN) == 0] = 0
+  f[rowsums(covN) == 0] = 0
   psN = matrix(pBinom(as.integer(covN), as.integer(varN), rep(f, ncol(covN))), ncol=ncol(covN))
   pSameF = apply(psN, 1, fisherTest)[2,]
   
@@ -184,8 +241,8 @@ markSomatics = function(variants, normalVariants, individuals, normals, cpus=cpu
   for ( name in names ) {
     catLog('Marking somatic mutations in ', name, '..', sep='')
     q = variants$variants[[name]]
-    #Require non-db SNP, and no flag
-    use = !q$db & q$flag == ''
+    #Require no flag
+    use = q$flag == ''
     q = q[use,]
     freq = q$var/q$cov
     freq[is.na(freq)] = -0.02
@@ -198,16 +255,27 @@ markSomatics = function(variants, normalVariants, individuals, normals, cpus=cpu
     #perfect 0,0,0,0, 0.5 frequencies
     pPolymorphic = 1/(1+nrow(q)/(polymorphicFrequency*basePairs))
     pNormalFreq = pBinom(q$cov, q$var, normalFreq)
-    normalOK = normalFreq < 0.01 & normalFreq < freq
+    normalOK = pmin(1, noneg((0.05-normalFreq)/0.05))^2*(normalFreq < freq)
+    notInNormal = as.numeric(!q$db)
     if ( name %in% names(CNs) ) {
-      cat('Correcting somatics using matched normal.\n')
+      catLog('Correcting somatics using matched normal.\n')
       qn = variants$variants[[correspondingNormal[name]]][use,]
-      normalOK = normalOK & (qn$cov == 0 | qn$var/qn$cov < 0.05) & qn$flag == ''
+      psameF = unlist(mclapply(1:nrow(q), function(i)
+        fisher.test(matrix(c(q$ref[i], q$var[i], qn$ref[i], qn$var[i]), nrow=2))$p.value,
+        mc.cores=cpus))
+      FDR = p.adjust(psameF, method='fdr')
+      notInNormal[q$db] = (FDR < 0.01 & qn$var/qn$cov < 0.05 & qn$var/qn$cov < q$var/q$cov & (q$dbMAF < 0.01 | !q$dbValidated))[q$db]
+      catLog('Recovered ', sum(notInNormal[q$db]), ' dbSNP variants that behave as somatics in ', name, '.\n', sep='')
+      notInNormal[!q$db] = (psameF < 0.05)[!q$db]
+      normalOK = normalOK*(qn$cov == 0 | qn$var/qn$cov < 0.05)
     }
     pSampleOK = p.adjust(q$pbq, method='fdr')*p.adjust(q$pmq, method='fdr')*p.adjust(q$psr, method='fdr')
     pZero = p.adjust(dbinom(q$var, q$cov, 0.01), method='fdr')   #the base quality cut on 30 correpsonds to 0.001 wrong base calls.
+    lowFrequencyPenalty = ifelse(q$cov > 0, pmin(1, 4*q$var/q$cov), 0) #penalty below 25% frequency
+    lowCoveragePenalty = pmin(1, q$cov/10) #penalty below 10 reads coverage
 
-    somaticP = (1-pPolymorphic)*(1-pNormalFreq)*normalOK*pSampleOK*(1-pZero)
+    somaticP = (1-pPolymorphic)*(1-pNormalFreq)*normalOK*pSampleOK*(1-pZero)*
+               notInNormal*lowFrequencyPenalty*lowCoveragePenalty
  
     variants$variants[[name]]$somaticP = 0
     variants$variants[[name]]$somaticP[use] = somaticP
@@ -223,9 +291,9 @@ findCorrespondingNormal = function(names, individuals, normals) {
     ind = individuals[name]
     isCancer = !normals[name]
     if ( !isCancer ) return(NA)
-    hasNormal = any(normals & individuals == ind)
+    hasNormal = any(normals & individuals == ind & names != name)
     if ( !hasNormal ) return(NA)
-    return(which(normals & individuals == ind)[1]) #fix this to support replicate normals!
+    return(which(normals & individuals == ind & names != name)[1]) #fix this to support replicate normals!
   })
   names(ret) = names
   return(ret)
@@ -233,9 +301,10 @@ findCorrespondingNormal = function(names, individuals, normals) {
 
 #calculates the p-value from a two-tailed binomial.
 pBinom = function(cov, var, f) {
-  use = cov > 0 & var >= 0
-  p = rep(1, length(cov))
   if ( length(f) == 1 ) f = rep(f, length(cov))
+  use = cov > 0 & var >= 0 & !is.na(cov) & !is.na(var) & f >= 0 & f <= 1 & !is.na(f)
+  p = ifelse(!use, NA, 1)
+  p[cov==0] = 1
   if ( length(f) != length(cov) | length(var) != length(cov) )
     cat('Length of f', length(f), 'must match length of cov', length(cov), 'or be 1.\n')
   p[use] = pbinom(var[use], cov[use], f[use]) -  dbinom(var[use], cov[use], f[use])/2
@@ -245,14 +314,28 @@ pBinom = function(cov, var, f) {
 
 #helper function that matches variants between two SNPs objects
 shareSNPs = function(SNPs1, SNPs2) {
-  newX = setdiff(SNPs2$x, SNPs1$x1)
-  newSNPs = SNPs2[as.character(newX),]
+  SNPs1 = SNPs1[!is.na(SNPs1$x),]
+  SNPs1 = SNPs1[!duplicated(SNPs1$x),]
+  SNPs2 = SNPs2[!is.na(SNPs2$x),]
+  SNPs2 = SNPs2[!duplicated(SNPs2$x),]
+  temp = options()$scipen
+  options(scipen = 100)
+  rownames(SNPs1) = as.character(SNPs1$x)
+  rownames(SNPs2) = as.character(SNPs2$x)
+  options(scipen = temp)
+  newRows = setdiff(rownames(SNPs2), rownames(SNPs1))
+  if ( length(newRows) == 0 ) return(SNPs1)
+  newSNPs = SNPs2[newRows,colnames(SNPs1)[colnames(SNPs1) %in% colnames(SNPs2)]]
   newSNPs$reads = newSNPs$readsReference = newSNPs$readsVariant = newSNPs$frequency = 0
   newSNPs$referencePlus = newSNPs$referenceMinus = newSNPs$variantPlus = newSNPs$variantMinus = 0
   newSNPs$frequency = -0.02
   newSNPs$pValue = newSNPs$filterPValue = 1
   newSNPs$ref = newSNPs$het = newSNPs$hom = 0
   newSNPs$nc = max(SNPs1$ref+SNPs1$het+SNPs1$hom+SNPs1$nc)
+  for ( col in setdiff(names(SNPs2), names(SNPs1)) ) {
+    catLog('adding ', col, '..', sep='')
+    SNPs1[[col]] = rep(NA, nrow(SNPs1))
+  }
   return(rbind(SNPs1, newSNPs))
 }
 
@@ -300,7 +383,7 @@ setVariantLoss = function(variants, maxLoops = 99, verbose=T) {
       break
     }
   }
-  if ( .variantLoss > 0.25 ) {
+  if ( variantLoss() > 0.25 ) {
     warning('Variant loss estimated to above 25%, which is suspiciously high. Will not correct for reference bias.\n')
     if ( verbose ) catLog('Variant loss estimated to above 25%, which is suspiciously high. Will not correct for reference bias.\n')
     assign('.variantLoss', 0, envir = .GlobalEnv)
@@ -309,17 +392,23 @@ setVariantLoss = function(variants, maxLoops = 99, verbose=T) {
 }
 
 #fetches the estimated loss of variants in alignment etc.
-variantLoss = function() {return(.variantLoss)}
+variantLoss = function() {
+  if ( !exists('.variantLoss') ) {
+    assign('.variantLoss', 0, envir = .GlobalEnv)
+    warning('.variantLoss not previouly defined. Setting to 0.\n')
+  }
+  return(get('.variantLoss', envir = .GlobalEnv))
+}
 
 #helper functions that handles reference bias.
 refBias = function(f, vL=variantLoss()) {
-  return(f*(1-vL)/(f*(1-vL) + 1-f))
+  return(pmin(1, pmax(0, f*(1-vL)/(f*(1-vL) + 1-f))))
 }
 refUnbias = function(f, vL=variantLoss()) {
-  return(f/(1-vL)/(f/(1-vL) + 1-f))
+  return(pmin(1, pmax(0, f/(1-vL)/(f/(1-vL) + 1-f))))
 }
 refBiasMirror = function(f, vL=variantLoss()) {
-  return(refBias(1 - refUnbias(f, vL), vL))
+  return(pmin(1, pmax(0, refBias(1 - refUnbias(f, vL), vL))))
 }
 mirrorDown = function(var, cov, vL=variantLoss()) {
   f = var/cov

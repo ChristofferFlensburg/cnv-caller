@@ -1,13 +1,9 @@
-#required packages
-require(limma)
-require(edgeR)
-require(Rsubread)
-require(parallel)
 
 #This function take a set of bamfiles, a set of normal bamfiles, and capture regions as input.
 #The function runs differential coverage one each sample vs the pool of normals using limma-voom.
 #the counts are loess and gc corrected.
-runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory, plotDirectory, normalRdirectory, cpus=1,
+runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory, plotDirectory, normalRdirectory,
+  settings=list(), cpus=1,
   forceRedoFit=F, forceRedoCount=F, forceRedoNormalCount=F) {
   catLog('Starting differential coverage analysis by sample.\n')
 
@@ -30,7 +26,7 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
     catLog('Counting reads over capture regions.\n')
     fCs = try(featureCounts(bamFiles, annot.ext=captureAnnotation, useMetaFeatures=T,
       allowMultiOverlap=T, isPairedEnd=T, minMQS=10, nthreads=cpus))
-    if ( class(fCs) != 'list' ) {
+    if ( class(fCs) != 'list' ) {region
       catLog('Error in featureCounts.\nInput was\nbamFiles:', bamFiles,
              '\ncaptureAnnotation[1:10,]:', as.matrix(captureAnnotation[1:10,]), '\n')
       stop('Error in featureCounts.')
@@ -121,108 +117,141 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   catLog('done.\n')
 
   countsOri = counts
-  catLog('Correcting for sex chromsome coverage..')
-  sexCorrectionFactor = list()
-  #multiply male coverage by 2 over the x chromsome in the normal samples
-  sexRows = 1:nrow(counts) %in% c(xes, yes)
-  for (i in 1:ncol(counts)) {
-    col = colnames(counts)[i]
-    if ( sex[col] == 'male' ) {
-      nonSexReads = sum(counts[!sexRows,col])
-      sexReads = sum(counts[sexRows,col])
-      normalisationFactor = (nonSexReads+sexReads)/(nonSexReads+2*sexReads)
-      sexCorrectionFactor[[i]] = ifelse(sexRows, 2*normalisationFactor, normalisationFactor)
+  
+  if ( getSettings(settings, 'sexCorrection') ) {
+    catLog('Correcting for sex chromsome coverage..')
+    sexCorrectionFactor = list()
+    #multiply male coverage by 2 over the x chromsome in the normal samples
+    sexRows = 1:nrow(counts) %in% c(xes, yes)
+    for (i in 1:ncol(counts)) {
+      col = colnames(counts)[i]
+      if ( sex[col] == 'male' ) {
+        nonSexReads = sum(counts[!sexRows,col])
+        sexReads = sum(counts[sexRows,col])
+        normalisationFactor = (nonSexReads+sexReads)/(nonSexReads+2*sexReads)
+        sexCorrectionFactor[[i]] = ifelse(sexRows, 2*normalisationFactor, normalisationFactor)
+      }
+      else sexCorrectionFactor[[i]] = rep(1, nrow(counts))
     }
-    else sexCorrectionFactor[[i]] = rep(1, nrow(counts))
+    sexCorrectionFactor = do.call(cbind, sexCorrectionFactor)
+    countsSex = counts*sexCorrectionFactor
+    catLog('done.\n')
   }
-  sexCorrectionFactor = do.call(cbind, sexCorrectionFactor)
-  countsSex = counts*sexCorrectionFactor
-  catLog('done.\n')
+  else {
+    catLog('Skipping sex correction.\n')
+    countsSex = counts
+  }
 
   #loess normalise normals, then match the non-normal M-A dependence to the normals.
   #This is not needed for most samples, but will really improve accuracy when there is an M-A bias.
-  catLog('Loess normalising counts to normals..')
-  counts = countsSex
-  counts[,group=='normal'] = loessNormAll(counts[,group=='normal'], span=0.5)
-  counts[,group=='normal'] = loessNormAll(counts[,group=='normal'], span=0.5)
-  counts[,group!='normal'] = loessNormAllToReference(counts[,group!='normal'], counts[,group=='normal'], span=0.5)
-  counts[,group!='normal'] = loessNormAllToReference(counts[,group!='normal'], counts[,group=='normal'], span=0.5)
-  loessCorrectionFactor = (0.5+counts)/(0.5+countsSex)
-  countsSexLo = counts
-  catLog('done.\n')
+  if ( getSettings(settings, 'MAcorrection') ) {
+    catLog('Loess normalising counts to normals..')
+    counts = countsSex
+    counts[,group=='normal'] = loessNormAll(counts[,group=='normal'], span=0.5)
+    counts[,group=='normal'] = loessNormAll(counts[,group=='normal'], span=0.5)
+    counts[,group!='normal'] = loessNormAllToReference(counts[,group!='normal'], counts[,group=='normal'], span=0.5)
+    counts[,group!='normal'] = loessNormAllToReference(counts[,group!='normal'], counts[,group=='normal'], span=0.5)
+    loessCorrectionFactor = (0.5+counts)/(0.5+countsSex)
+    countsSexLo = counts
+    catLog('done.\n')
+  }
+  else {
+    catLog('Skipping loess normalising.\n')
+    counts = countsSex
+    countsSexLo = counts
+  }
 
   #gc correcting
-  catLog('Correcting for GC bias..')
-  GCdirectory = paste0(diagnosticPlotsDirectory, '/GCplots/')
-  if ( !file.exists(GCdirectory) ) dir.create(GCdirectory)
-  genes = rownames(counts)
-  regionNames = captureRegions$region
-  gc = as.numeric(captureRegions$gc)
-  widths = noneg(width(captureRegions))+1
-  gc = sapply(genes, function(gene) {
-    is = which(regionNames == gene)
-    if ( length(is) == 0 ) return(0)
-    return(sum(gc[is]*widths[is])/sum(widths[is]))
-  })
-  GCcorrectionFactor = list()
-  GCdirectory = 
-  for (i in 1:ncol(counts)) {
-    col = colnames(counts)[i]
-    catLog(col, '..', sep='')
-    lo = loess(cov~gc, data=data.frame(cov=log((0.5+counts[,col])/(annotation$Length)), gc=gc),
-      weights=noneg(annotation$Length-100), span=0.3, family='symmetric', degrees=1)
-    los = exp(predict(lo, gc))
-    GCcorrectionFactor[[i]] = pmin(10, pmax(0.1, (1/los)/mean(1/los)))
-    GCcorrectionFactor[[i]] = GCcorrectionFactor[[i]]*sum(counts[,col])/sum(counts[,col]*GCcorrectionFactor[[i]])
-    plotfile = paste0(GCdirectory, col, '.png')
-    if ( !file.exists(plotfile) | forceRedoFit ) {
-      png(plotfile, height=2000, width=4000, res=144)
-      plotColourScatter(gc, ((0.5+counts[,col])/(annotation$Length)), ylim=c(0,2),
-                        cex=pmin(3,sqrt(noneg(annotation$Length-100)/1000))*1.5,
-                        main=col, xlab='GC content', ylab='reads/bp', verbose=F)
-      lines((0:100)/100, exp(predict(lo, (0:100)/100)), lwd=5, col=mcri('orange'))
-      legend('topleft', 'loess fit', lwd=5, col=mcri('orange'))
-      dev.off()
+  if ( getSettings(settings, 'GCcorrection') ) {
+    catLog('Correcting for GC bias..')
+    GCdirectory = paste0(diagnosticPlotsDirectory, '/GCplots/')
+    if ( !file.exists(GCdirectory) ) dir.create(GCdirectory)
+    genes = rownames(counts)
+    regionNames = captureRegions$region
+    gc = as.numeric(captureRegions$gc)
+    widths = noneg(width(captureRegions))+1
+    gc = unlist(mclapply(genes, function(gene) {
+      is = which(regionNames == gene)
+      if ( length(is) == 0 ) return(0)
+      return(sum(gc[is]*widths[is])/sum(widths[is]))
+    }, mc.cores=cpus))
+    GCcorrectionFactor = list()
+    for (i in 1:ncol(counts)) {
+      col = colnames(counts)[i]
+      catLog(col, '..', sep='')
+      lo = loess(cov~gc, data=data.frame(cov=log((0.5+counts[,col])/(annotation$Length)), gc=gc),
+        weights=noneg(annotation$Length-100), span=0.3, family='symmetric', degrees=1)
+      los = exp(predict(lo, gc))
+      GCcorrectionFactor[[i]] = pmin(10, pmax(0.1, (1/los)/mean(1/los)))
+      GCcorrectionFactor[[i]] = GCcorrectionFactor[[i]]*sum(counts[,col])/sum(counts[,col]*GCcorrectionFactor[[i]])
+      plotfile = paste0(GCdirectory, col, '.png')
+      if ( !file.exists(plotfile) | forceRedoFit ) {
+        png(plotfile, height=2000, width=4000, res=144)
+        plotColourScatter(gc, ((0.5+counts[,col])/(annotation$Length)), ylim=c(0,2),
+                          cex=pmin(3,sqrt(noneg(annotation$Length-100)/1000))*1.5,
+                          main=col, xlab='GC content', ylab='reads/bp', verbose=F)
+        lines((0:100)/100, exp(predict(lo, (0:100)/100)), lwd=5, col=mcri('orange'))
+        legend('topleft', 'loess fit', lwd=5, col=mcri('orange'))
+        dev.off()
+      }
     }
+    GCcorrectionFactor = do.call(cbind, GCcorrectionFactor)
+    countsSexLoGC = countsSexLo*GCcorrectionFactor
+    catLog('done!\n')
   }
-  GCcorrectionFactor = do.call(cbind, GCcorrectionFactor)
-  countsSexLoGC = countsSexLo*GCcorrectionFactor
-  catLog('done!\n')
+  else {
+    catLog('Skipping correction for GC bias.\n')
+    countsSexLoGC = countsSexLo
+  }
 
   #loess correct the GC corrected counts
-  catLog('Second round of loess normalisation..')
-  counts = countsSexLoGC
-  counts[,group=='normal'] = loessNormAll(counts[,group=='normal'], span=0.5)
-  counts[,group=='normal'] = loessNormAll(counts[,group=='normal'], span=0.5)
-  counts[,group!='normal'] = loessNormAllToReference(counts[,group!='normal'], counts[,group=='normal'], span=0.5)
-  counts[,group!='normal'] = loessNormAllToReference(counts[,group!='normal'], counts[,group=='normal'], span=0.5)
-  loessCorrectionFactor2 = (0.5+counts)/(0.5+countsSexLoGC)
-  countsSexLoGCLo = counts
-  catLog('done.\n')
-
-
-  catLog('Returning sex effects to non-normal samples..')
-  #divide back male coverage by 2 over the x chromsome in the (non-normal) samples
-  returnSampleSexCorrectionFactor = list()
-  sexRows = 1:nrow(counts) %in% c(xes, yes)
-  for (i in 1:ncol(counts)) {
-    col = colnames(counts)[i]
-    if ( sex[col] == 'male' & i <= length(names) ) {
-      returnSampleSexCorrectionFactor[[i]] = ifelse(sexRows, 1/2, 1)
-    }
-    else returnSampleSexCorrectionFactor[[i]] = rep(1, nrow(counts))
+  if ( getSettings(settings, 'MAcorrection') ) {
+    catLog('Second round of loess normalisation..')
+    counts = countsSexLoGC
+    counts[,group=='normal'] = loessNormAll(counts[,group=='normal'], span=0.5)
+    counts[,group=='normal'] = loessNormAll(counts[,group=='normal'], span=0.5)
+    counts[,group!='normal'] = loessNormAllToReference(counts[,group!='normal'], counts[,group=='normal'], span=0.5)
+    counts[,group!='normal'] = loessNormAllToReference(counts[,group!='normal'], counts[,group=='normal'], span=0.5)
+    loessCorrectionFactor2 = (0.5+counts)/(0.5+countsSexLoGC)
+    countsSexLoGCLo = counts
+    catLog('done.\n')
   }
-  returnSampleSexCorrectionFactor = do.call(cbind, returnSampleSexCorrectionFactor)
-  countsSexLoGCLoSex = countsSexLoGCLo*returnSampleSexCorrectionFactor
-  counts = countsSexLoGCLoSex
-  catLog('done.\n')
+  else {
+    catLog('Skipping second round of loess normalisation.\n')
+    counts = countsSexLoGC
+    countsSexLoGCLo = counts
+  }
+
+
+  if ( getSettings(settings, 'sexCorrection') ) {
+    catLog('Returning sex effects to non-normal samples..')
+    #divide back male coverage by 2 over the x chromsome in the (non-normal) samples
+    returnSampleSexCorrectionFactor = list()
+    sexRows = 1:nrow(counts) %in% c(xes, yes)
+    for (i in 1:ncol(counts)) {
+      col = colnames(counts)[i]
+      if ( sex[col] == 'male' & i <= length(names) ) {
+        returnSampleSexCorrectionFactor[[i]] = ifelse(sexRows, 1/2, 1)
+      }
+      else returnSampleSexCorrectionFactor[[i]] = rep(1, nrow(counts))
+    }
+    returnSampleSexCorrectionFactor = do.call(cbind, returnSampleSexCorrectionFactor)
+    countsSexLoGCLoSex = countsSexLoGCLo*returnSampleSexCorrectionFactor
+    counts = countsSexLoGCLoSex
+    catLog('done.\n')
+  }
+  else {
+    catLog('Skipping second round of sex correction.\n')
+    sexRows = 1:nrow(counts) %in% c(xes, yes)
+    countsSexLoGCLoSex = countsSexLoGCLo
+    counts = countsSexLoGCLoSex
+  }
 
   improvement = c()
   for ( col1 in (length(names)+1):(ncol(counts)-1) ) {
     for ( col2 in (col1+1):ncol(counts) ) {   
       corVar = exp(sqrt(mean(log((0.5+libNorm(counts)[!sexRows,col1])/(0.5+libNorm(counts)[!sexRows,col2]))^2)))
       var = exp(sqrt(mean(log((0.5+libNorm(countsOri)[!sexRows,col1])/(0.5+libNorm(countsOri)[!sexRows,col2]))^2)))
-      print(c(var-1, corVar-1))
       improvement = c(improvement, (corVar-1)/(var-1))
     }
   }
@@ -253,7 +282,7 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   }
 
   catLog('Running voom..')
-  jpeg(paste0(diagnosticPlotsDirectory, '/voomVariance.jpg'), height=1000, width=2000)
+  png(paste0(diagnosticPlotsDirectory, '/voomVariance.png'), height=1000, width=2000)
   voomWeights = voom(countsOri, design=design, plot=T)
   voomWeights$weights[yes,design[,'normal']==1 & sex == 'female'] = 0
   dev.off()
@@ -416,44 +445,6 @@ plotMA = function(x, y, col=mcri('darkblue'), libNorm = F, span=0.2,
     lines(As, predict(lo, As), col=mcri('orange'), lwd=6)
   }
 }
-
-#helper function that returns the mcri version of the provided colour(s) if available
-#Otherwise returns the input. Call without argument to see available colours
-mcri = function(col=0, al=1) {
-  if ( col[1] == 0 ) {
-    cat('Use: mcri(\'colour\'), returning an official MCRI colour.\nAvailable MCRI colours are:\n\ndarkblue\nblue\nlightblue\nazure\ngreen\norange\nviolet\ncyan\nred\ndarkred\nmagenta (aka rose).\n\nReturning default blue.\n')
-    return(mcri('blue'))
-  }
-  if ( length(col) > 1 ) return(sapply(col, function(c) mcri(c, al)))
-  if ( is.numeric(col) ) {
-    col = (col %% 9) + 1
-    if ( col == 1 ) col = 'blue'
-    else if ( col == 2 ) col = 'orange'
-    else if ( col == 3 ) col = 'green'
-    else if ( col == 4 ) col = 'magenta'
-    else if ( col == 5 ) col = 'cyan'
-    else if ( col == 6 ) col = 'red'
-    else if ( col == 7 ) col = 'violet'
-    else if ( col == 8 ) col = 'darkblue'
-    else if ( col == 9 ) col = 'darkred'
-    else col = 'black'
-  }
-  ret = 0
-  if ( col == 'darkblue') ret = rgb(9/255, 47/255, 94/255, al)
-  if ( col == 'blue') ret = rgb(0, 83/255, 161/255, al)
-  if ( col == 'lightblue') ret = rgb(0, 165/255, 210/255, al)
-  if ( col == 'azure') ret = rgb(0, 173/255, 239/255, al)
-  if ( col == 'green') ret = rgb(141/255, 198/255, 63/255, al)
-  if ( col == 'orange') ret = rgb(244/255, 121/255, 32/255, al)  
-  if ( col == 'violet') ret = rgb(122/255, 82/255, 199/255, al)  
-  if ( col == 'cyan') ret = rgb(0/255, 183/255, 198/255, al)  
-  if ( col == 'red') ret = rgb(192/255, 80/255, 77/255, al)  
-  if ( col == 'darkred') ret = rgb(96/255, 40/255, 38/255, al)  
-  if ( col == 'magenta' | col == 'rose') ret = rgb(236/255, 0/255, 140/255, al)
-  if ( ret == 0 ) ret = do.call(rgb, as.list(c(col2rgb(col)/255, al)))
-  return(ret)
-}
-
 
 #helper function for plotting
 #A pimped up version of the usual boring plot.

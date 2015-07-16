@@ -13,7 +13,6 @@ outputNewVariants = function(variants, pairs, genome, directory, cpus=1, forceRe
       catLog('Looking for new cancer variants in ', name2, '\n')
       news[[name2]] = newVariants(variants$variants[[pair[2]]], variants$variants[[pair[1]]], variants$SNPs, genome, cpus=cpus)
     }
-    library(WriteXLS)
     WriteXLS('news', outfile)
   }
 }
@@ -35,7 +34,6 @@ newVariants = function(q1, q2, SNPs, genome, cpus=1, ps=NA) {
     if ( cpus==1 )   
       ps = sapply(1:length(freq1), function(i) fisher.test(matrix(c(q1$ref[i], q1$var[i], q2$ref[i], q2$var[i]), nrow=2))$p.value)
     else {
-      require(parallel)
       ps = unlist(mclapply(1:length(freq1), function(i) fisher.test(matrix(c(q1$ref[i], q1$var[i], q2$ref[i], q2$var[i]), nrow=2))$p.value, mc.cores=cpus))      
     }
   }

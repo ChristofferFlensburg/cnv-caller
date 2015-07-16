@@ -1,6 +1,6 @@
 
 #takes the subclone evolution from the stories and plots rivers, showing which events are aprt of which subclone.
-makeRiverPlots = function(stories, variants, genome, plotDirectory, forceRedo=forceRedoRiver) {
+makeRiverPlots = function(stories, variants, genome, cpus=1, plotDirectory, forceRedo=forceRedoRiver) {
   if ( length(stories) == 0 ) return
   riverDirectory = paste0(plotDirectory, '/rivers/')
   if ( !file.exists(riverDirectory) ) dir.create(riverDirectory)
@@ -11,13 +11,28 @@ makeRiverPlots = function(stories, variants, genome, plotDirectory, forceRedo=fo
     labels = lapply(stories[[ts]]$clusters$storyList, function(rows) storyToLabel(stories[[ts]]$all[rows,], variants$SNPs, genome=genome))
     pdf(file, width=15, height=10)
     cloneCols = plotRiver(stories[[ts]]$cloneTree, stories[[ts]]$clusters$cloneStories, labels)
-    plotStories(stories[[ts]]$clusters$cloneStories, variants$SNPs, col=cloneCols)
+    plotStories(stories[[ts]]$clusters$cloneStories, variants$SNPs, col=cloneCols, genome=genome)
+    heatmapStories(stories[[ts]]$all, stories[[ts]]$clusters$storyList, variants$SNPs, labels=do.call(c, labels), genome=genome)
     for ( subclone in names(stories[[ts]]$clusters$storyList) ) {
       i = which(names(stories[[ts]]$clusters$storyList) == subclone)
       plotStories(stories[[ts]]$all[stories[[ts]]$clusters$storyList[[subclone]],], variants$SNPs, alpha=0.2)
       plotStories(stories[[ts]]$clusters$cloneStories[i,], variants$SNPs, add=T, col=cloneCols[i])
     }
     dev.off()
+    catLog('done.\n')
+    catLog('Outputting data on stories ', ts, '..', sep='')
+    excelFile = paste0(riverDirectory, ts, '-river.xls')
+    output = do.call(rbind, lapply(stories[[ts]]$clusters$storyList, function(sL) stories[[ts]]$all[sL,]))
+    clone = do.call(c, lapply(1:length(stories[[ts]]$clusters$storyList), function(i) rep(i, length(stories[[ts]]$clusters$storyList[[i]]))))
+    output$clone = clone
+    chr = xToChr(output$x1, genome)
+    start = xToPos(output$x1, genome)
+    end = xToPos(output$x2, genome)
+    label = unlist(labels)
+    clonality = as.data.frame(output$stories)
+    error = as.data.frame(output$errors)
+    output = cbind(chr = chr, start=start, end=end, name=label, clone=output$clone, clonality=clonality, error=error)
+    WriteXLS('output', excelFile)
     catLog('done.\n')
   }
 }
@@ -27,8 +42,10 @@ storyToLabel = function(stories, SNPs, genome) {
   call = stories$call
   isSNP = grepl('[0-9]', call)
   ret = ''
-  ret[isSNP] = paste0(SNPs[as.character(stories$x1), ]$reference, ' -> ', gsub('^[0-9]*', '', call), ': ',
-       SNPs[as.character(stories$x1), ]$inGene, ' (', xToChr(stories$x1, genome=genome), ')')[isSNP]
+  SNPs = SNPs[SNPs$x %in% stories$x1,]
+  SNPs = SNPs[as.character(stories$x1[isSNP]),]
+  ret[isSNP] = paste0(SNPs$reference, ' -> ', gsub('^[0-9]*', '', call[isSNP]), ': ',
+       SNPs$inGene, ' (', xToChr(stories$x1[isSNP], genome=genome), ')')
   dist = stories$x2-stories$x1
   distText = ifelse(dist >= 1e6, paste0(round(dist/1e6), 'Mbp '), ifelse(dist >= 1e3, paste0(round(dist/1e3), 'kbp '), paste0(dist, 'bp ')))
   ret[!isSNP & !is.na(dist)] = paste0(distText, call, ' (', xToChr(stories$x1, genome=genome), ')')[!isSNP & !is.na(dist)]
@@ -180,7 +197,7 @@ addStreamSegment = function(x1, x2, y1low, y1high, y2low, y2high, range=c(0,1), 
 }
 
 
-plotStories = function(stories, SNPs, col='default', lty='default', add=F, alpha=1, xlab='sample', ylab='clonality', lwd='default', errorBars=T, setPar=T, legend=T, labels=T, xlim='default',...) {
+plotStories = function(stories, SNPs, col='default', lty='default', add=F, alpha=1, xlab='sample', ylab='clonality', lwd='default', errorBars=T, setPar=T, legend=T, labels=T, xlim='default', genome='hg19',...) {
   names = rownames(stories)
   clon = stories$stories
   ce = stories$errors
@@ -193,6 +210,8 @@ plotStories = function(stories, SNPs, col='default', lty='default', add=F, alpha
     errcol = randomCols(row(clon), a=alpha)
   }
   else if ( length(col) == Nmut ) {
+    if ( all(rownames(clon) %in% names(col)))
+      col = col[rownames(clon)]
     segcol = rep(col, Nsample-1)
     errcol = rep(col, Nsample)
   }
@@ -228,12 +247,108 @@ plotStories = function(stories, SNPs, col='default', lty='default', add=F, alpha
   }
 
   if ( !add ) {
-    if ( legend )
-      legend('right', storyToLabel(stories, SNPs, genome), lwd=2, col=errcol[1:nrow(stories)], lty=errlty[1:nrow(stories)])
+    if ( legend ) {
+      lbls = storyToLabel(stories, SNPs, genome)
+      legCex = pmin(1, pmax(0.5, 45/length(lbls)))
+      legend('topright', lbls, lwd=2, col=errcol[1:nrow(stories)], lty=errlty[1:nrow(stories)], cex= legCex)
+      
+    }
     if ( labels ) text(1:Nsample, -0.02, colnames(stories$stories), srt=20, cex=0.9)
     if ( setPar ) {
       par(oma=rep(0, 4))
       par(mar=rep(4, 4))
     }
   }
+}
+
+heatmapStories = function(stories, storyList, SNPs, labels=NA, genome='hg19') {
+  stories = stories[do.call(c, storyList),]
+  clone = do.call(c, lapply(1:length(storyList), function(i) rep(i, length(storyList[[i]]))))
+  sideCol = randomCols(clone)
+  
+  clon = stories$stories
+
+  if ( is.na(labels)[1] )
+    labels = storyToLabel(stories, SNPs, genome)
+  rownames(clon) = labels
+
+
+  nRect = 200
+  cols = colourGradient(cols=mcri(c('white', 'cyan', 'blue', 'red')),
+    anchors=c(0, 0.25, 0.5, 1), steps=nRect)
+  if ( nrow(clon) < 1000 )
+    heatmap(clon, scale='none', col=cols, RowSideColors=sideCol, Colv=NA)
+  else {
+    catLog('Too many stories for the built-in heatmap clustering, using default row ordering.\n')
+    heatmap(clon, scale='none', col=cols, RowSideColors=sideCol, Colv=NA, Rowv=NA)
+  }
+
+  barXmax = par('usr')[1]*0.88+par('usr')[2]*0.12
+  barXmin = par('usr')[1]*0.92+par('usr')[2]*0.08
+  barYmin = par('usr')[3]*0.8+par('usr')[4]*0.2
+  barYmax = par('usr')[3]*0.2+par('usr')[4]*0.8
+  lowY = barYmin + (0:(nRect-1))*(barYmax-barYmin)/nRect
+  highY = barYmin + (1:nRect)*(barYmax-barYmin)/nRect
+  lowX = rep(barXmin, nRect)
+  highX = rep(barXmax, nRect)
+  barCols = cols
+  rect(lowX, lowY, highX, highY, col=barCols, border=F)
+  segments(rep(barXmin, 3), barYmin + c(0.002, 0.5, 0.998)*(barYmax-barYmin),
+           rep(barXmin-(barXmax-barXmin)*0.1, 3), barYmin + c(0.002, 0.5, 0.998)*(barYmax-barYmin),
+           lwd=2, col=barCols[c(1, round(nRect/2), nRect)])
+  minDist = min(clon)
+  maxDist = max(clon)
+  text(rep(barXmin-(barXmax-barXmin)*0.2, 4), barYmin + c(0.003, 0.5, 0.997, 1.07)*(barYmax-barYmin),
+       c(round(c(minDist, (minDist+maxDist)/2, maxDist), 2), 'clonality'), adj=c(1, 0.5))
+
+}
+
+
+#This function takes two colours (in a format that can be handled by col2rgb, such as "red", or rgb(0.1, 0.2, 0.3))
+#and two weights and returns a weighted average between the two colours.
+#Mainly a helper function for colourGradient, but can potentially find uses on itself.
+combineColours = combineColors = function (col1, col2, w1=0.5, w2=0.5) {
+  rgb1 = col2rgb(col1)
+  rgb2 = col2rgb(col2)
+  if ( w1 == Inf & w2 == Inf ) {
+    w1 = 0.5
+    w2 = 0.5
+  }
+  if ( w1 == Inf ) {
+    w1 = 1
+    w2 = 0
+  }
+  if ( w2 == Inf ) {
+    w1 = 0
+    w2 = 1
+  }
+  combinedRgb = (rgb1*w1 + rgb2*w2)/(w1+w2)
+  combinedColour = do.call(rgb, as.list(pmin(1, pmax(0, combinedRgb/255))))
+  return(combinedColour)
+}
+#Takes a vector of colours (in a format that can be handled by col2rgb, such as "red", or rgb(0.1, 0.2, 0.3))
+#and an optional sorted vector of anchor points between 0 and 1. Returns a vector of colours of length @steps
+#that gradually goes through the colours in the vector, hitting each colour at  fraction through the vector
+#set by the anchor points. Defaults to a 100-step vector from blue through white to red.
+colourGradient = colorGradient = function(cols=mcri(c('red', 'orange', 'white', 'cyan', 'blue')), steps=100, anchors=(1:length(cols)-1)/(length(cols)-1) ) {
+  if ( length(anchors) != length(cols) ) {
+    warning(paste0('colourGradient: Length of cols and anchors has to be the same. They are ', length(cols), ' and ', length(anchors), '. Returning default colour gradient.'))
+  }
+  N = length(cols)
+  x = (0:(steps-1))/(steps-1)
+  if ( any(anchors != sort(anchors)) ) warning('colourGradient: anchors not sorted. Sorting.')
+  ord = order(anchors)
+  anchors = anchors[ord]
+  cols = cols[ord]
+  anchors = c(-Inf, anchors, Inf)
+  cols = c(cols[1], cols, cols[length(cols)])
+  col2i = sapply(x, function(X) which(anchors > X)[1])
+  col1i = col2i-1
+  col1 = cols[col1i]
+  col2 = cols[col2i]
+  w1 = 1/abs(x-anchors[col1i])
+  w2 = 1/abs(x-anchors[col2i])
+  gradient = sapply(1:length(col1), function(i) combineColours(col1[i], col2[i], w1[i], w2[i]))
+  names(gradient) = x
+  return(gradient)
 }

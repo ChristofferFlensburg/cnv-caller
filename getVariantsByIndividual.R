@@ -3,159 +3,165 @@
 #The function filters variants outside of the capture regions, and a few other filters.
 #The function the checks the variants in the bamfiles, and flags if the variant seems suspicious.
 #Outputs a data frame for each sample with variant and reference counts, as well as some quality information.
-getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffset, dbDir, Rdirectory, plotDirectory, cpus, forceRedoSNPs=F, forceRedoVariants=F) {
-  SNPsSaveFile = paste0(Rdirectory, '/SNPs.Rdata')
-  if ( file.exists(SNPsSaveFile) & !forceRedoSNPs ) {
-    catLog('Loading saved SNVs.\n')
-    load(file=SNPsSaveFile)
-  }
-  else {
-    catLog('Importing SNV positions..')
-    SNPs = try(varScanSNPToMut(vcfFiles, genome=genome))
-    if ( class(SNPs) == 'try-error' ) {
-      catLog('Error in varScanSNPToMut.\n')
-      stop('Error in varScanSNPToMut.')
-    }
-    if ( any(is.na(as.matrix(SNPs))) ) {
-      catLog('NA in SNPs:\n')
-      for ( row in which(sapply(1:nrow(SNPs), function(row) any(is.na(SNPs[row,])))) ) catLog(SNPs[row,], '\n')
-      stop('NA in SNPs.')
-    }
-    catLog('done.\n')
-    
-    catLog('Tagging SNVs within padded capture region..')
-    paddedCaptureRegions = captureRegions
-    start(paddedCaptureRegions) = start(captureRegions) - 300
-    end(paddedCaptureRegions) = end(captureRegions) + 300
-    SNPs = inGene(SNPs, paddedCaptureRegions, genome=genome)
-    catLog('done.\n')
-    
-    inCapture = SNP2GRanges(SNPs, genome=genome) %within% paddedCaptureRegions
-    catLog('Keeping ', sum(inCapture), ' out of ', length(inCapture),
-           ' (', round(sum(inCapture)/length(inCapture), 3)*100, '%) SNVs that are inside capture regions.\n', sep='')
-    SNPs = SNPs[inCapture,]
-
-    flag = flagStrandBias(SNPs)
-    catLog('Keeping ', sum(!flag), ' out of ', length(flag),
-           ' (', round(sum(!flag)/length(flag), 3)*100, '%) SNVs that have consistent strand ratios.\n', sep='')
-    SNPs = SNPs[!flag,]
-    
-    catLog('Matching to dbSNPs.\n')
-    SNPs = matchTodbSNPs(SNPs, dir=dbDir, genome=genome)
-    
-    catLog('Saving SNVs..')
-    save(SNPs, file=SNPsSaveFile)
-    catLog('done.\n')
-  }
-
-  variantsSaveFile = paste0(Rdirectory, '/variants.Rdata')
-  if ( file.exists(variantsSaveFile) & !forceRedoVariants ) {
-    catLog('Loading saved variants from', variantsSaveFile, '..')
-    load(file=variantsSaveFile)
-    catLog('done. Loaded variants of dim', dim(variants[[1]]), '\n')
-  }
-  else {
-    catLog('Calculating variants:\n')
-    gc()
-    variants = lapply(bamFiles, function(file) {
-      QCsnps(pileups=importQualityScores(SNPs, file, BQoffset, genome=genome, cpus=cpus)[[1]], SNPs=SNPs, cpus=cpus)})
-    names(variants)=names
-    variants = lapply(variants, function(q) q[apply(!is.na(q), 1, any),])
-    variants = shareVariants(variants)
-    
-    present = rowSums(sapply(variants, function(q) q$var > q$cov*0.05)) > 0
-    catLog('Keeping ', sum(present), ' out of ', length(present),
-           ' (', round(sum(present)/length(!present), 3)*100, '%) SNVs that are present at 5% frequency in at least one sample.\n', sep='')
-    variants = lapply(variants, function(q) q[present,])
-    SNPs = SNPs[SNPs$x %in% variants[[1]]$x,]
-    catLog('Saving SNVs..')
-    save(SNPs, file=SNPsSaveFile)
-    catLog('done.\n')
-
-
-    for ( i in 1:length(variants) )  variants[[i]]$db = SNPs[as.character(variants[[i]]$x),]$db
-    for ( i in 1:length(variants) )  variants[[i]]$dbValidated = SNPs[as.character(variants[[i]]$x),]$dbValidated
-    for ( i in 1:length(variants) )  variants[[i]]$dbMAF = SNPs[as.character(variants[[i]]$x),]$dbMAF
-
-    variants = lapply(variants, function(q) q[order(q$x, q$variant),])
-    
-    catLog('Saving variants..')
-    save(variants, file=variantsSaveFile)
-    catLog('done.\n')
-    
-    diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
-    if ( !file.exists(diagnosticPlotsDirectory) ) dir.create(diagnosticPlotsDirectory)
-    FreqDirectory = paste0(diagnosticPlotsDirectory, '/frequencyDistribution/')
-    catLog('Plotting frequency distributions to ', FreqDirectory,'..', sep='')
-    if ( !file.exists(FreqDirectory) ) dir.create(FreqDirectory)
-    for ( sample in names(variants) ) {
-      catLog(sample, '..', sep='')
-      use = variants[[sample]]$cov > 0
-      png(paste0(FreqDirectory, sample, '-varcov.png'), height=2000, width=4000, res=144)
-      plotColourScatter((variants[[sample]]$var/variants[[sample]]$cov)[use], variants[[sample]]$cov[use],
-                        log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
-      dev.off()
-    }
-    use = variants[[sample]]$var > 0
-    if ( any(use) ) {
-      png(paste0(FreqDirectory, sample, '-hist.png'), height=2000, width=4000, res=144)
-      hist((variants[[sample]]$var/variants[[sample]]$cov)[use], breaks=(0:100)/100, col=mcri('blue'))
-      dev.off()
-    }
-    catLog('done.\n')  
+getVariantsByIndividual = function(metaData, captureRegions, genome, BQoffset, dbDir, Rdirectory, plotDirectory, cpus, forceRedo=F) {
+  catLog('Using variants by individual.\n')
+  saveFile = paste0(Rdirectory, '/variantsBI.Rdata')
+  if ( file.exists(saveFile) & !forceRedo ) {
+    catLog('Loading saved variants by individual.\n')
+    load(file=saveFile)
+    return(variantsBI)
   }
   
-  return(list(SNPs=SNPs, variants=variants))
+  variantsBI = list()
+
+  #iterate over individuals
+  for ( individual in unique(metaData$INDIVIDUAL) ) {
+    catLog('\nVariants for', individual, '\n')
+    samples = metaData$NAME[metaData$INDIVIDUAL == individual]
+    positionsSaveFile = paste0(Rdirectory, '/positions.', individual,'.Rdata')
+    variantsSaveFile = paste0(Rdirectory, '/variants.', individual,'.Rdata')
+    if ( file.exists(variantsSaveFile) & !forceRedo ) {
+      catLog('Loading saved variants for', individual,'\n')
+      load(file=variantsSaveFile)
+      variantsBI = c(variantsBI, variants)
+      next
+    }
+    if ( file.exists(positionsSaveFile) & !forceRedo ) {
+      catLog('Loading saved positions for', individual,'\n')
+      load(file=positionsSaveFile)
+    }
+    else {
+      #extract positions in any vcf of any sample from this individual
+      vcfFiles = metaData[samples,]$VCF
+      positions = vcfToPositions(vcfFiles, genome=genome)
+
+      #keep only positions within 300bp of a capture region
+      paddedCaptureRegions = captureRegions
+      start(paddedCaptureRegions) = start(captureRegions) - 300
+      end(paddedCaptureRegions) = end(captureRegions) + 300
+      positions = inGene(positions, paddedCaptureRegions, genome=genome)
+      inCapture = SNP2GRanges(positions, genome=genome) %within% paddedCaptureRegions
+      catLog('Keeping ', sum(inCapture), ' out of ', length(inCapture),
+             ' (', round(sum(inCapture)/length(inCapture), 3)*100,
+             '%) SNVs that are inside capture regions.\n', sep='')
+      positions = positions[inCapture,]
+      catLog('saving positions...')
+      save(positions, file=positionsSaveFile)
+      catLog('done.\n')
+    }
+
+    #extract variant information over the identified positions
+    bamFiles = metaData[samples,]$BAM
+    variants = lapply(bamFiles, function(file) {
+      QCsnps(pileups=importQualityScores(positions, file, BQoffset, genome=genome, cpus=cpus)[[1]],
+             positions=positions, cpus=cpus)
+    })
+    names(variants) = samples
+    variants = lapply(variants, function(q) q[apply(!is.na(q), 1, any),])
+    variants = shareVariants(variants)
+    catLog('saving variants...')
+    save(variants, file=variantsSaveFile)
+    catLog('done.\n')
+
+    variantsBI = c(variantsBI, variants)
+  }
+
+  #check db SNP for called variants.
+  variantsBI = matchTodbSNPs(variantsBI, dir=dbDir, genome=genome)
+  variantsBI = lapply(variantsBI, function(q) q[order(q$x, q$variant),])
+    
+
+  #generate SNPs, mainly for backwards compatibility
+  q = do.call(rbind, variantsBI)
+  q = q[!duplicated(q$x),]
+  q = q[order(q$x),]
+  inGene = xToGene(q$x)
+  names(inGene) = q$x
+  SNPs = data.frame(x=q$x, chr=xToChr(q$x), start=xToPos(q$x), end=xToPos(q$x),
+                    inGene=inGene, reference=q$reference, variant=q$variant, db=q$db)
+  variantsBI = lapply(variantsBI, function(q) {
+    q$inGene = inGene[as.character(q$x)]
+    return(q)
+    })
+
+  variantsBI = list(variants=variantsBI, SNPs=SNPs)
+
+  catLog('Saving variants..')
+  save(variantsBI, file=saveFile)
+  catLog('done.\n')
+
+  
+  diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
+  if ( !file.exists(diagnosticPlotsDirectory) ) dir.create(diagnosticPlotsDirectory)
+  FreqDirectory = paste0(diagnosticPlotsDirectory, '/frequencyDistribution/')
+  catLog('Plotting frequency distributions to ', FreqDirectory,'..', sep='')
+  if ( !file.exists(FreqDirectory) ) dir.create(FreqDirectory)
+  for ( sample in names(variantsBI$variants) ) {
+    catLog(sample, '..', sep='')
+    use = variantsBI$variants[[sample]]$cov > 0
+    png(paste0(FreqDirectory, sample, '-varcov.png'), height=2000, width=4000, res=144)
+    plotColourScatter((variantsBI$variants[[sample]]$var/variantsBI$variants[[sample]]$cov)[use],
+                      variantsBI$variants[[sample]]$cov[use],
+                      log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
+    dev.off()
+    
+    use = variantsBI$variants[[sample]]$var > 0
+    if ( any(use) ) {
+      pdf(paste0(FreqDirectory, sample, '-hist.pdf'), height=7, width=14)
+      hist((variantsBI$variants[[sample]]$var/variantsBI$variants[[sample]]$cov)[use],
+           breaks=(0:100)/100, col=mcri('blue'), main='all Variants',
+           xlab='variant frequency', ylab='number of variants')
+      cleanUse = use & variantsBI$variants[[sample]]$flag == ''
+      if ( any(cleanUse) ) {
+        hist((variantsBI$variants[[sample]]$var/variantsBI$variants[[sample]]$cov)[cleanUse],
+             breaks=(0:100)/100, col=mcri('blue'), main='clean Variants',
+             xlab='variant frequency', ylab='number of variants')
+      }
+      cleanDbUse = cleanUse & variantsBI$variants[[sample]]$db
+      if ( any(cleanDbUse) ) {
+        hist((variantsBI$variants[[sample]]$var/variantsBI$variants[[sample]]$cov)[cleanDbUse],
+             breaks=(0:100)/100, col=mcri('blue'), main='clean dbSNP Variants',
+             xlab='variant frequency', ylab='number of variants')
+      }
+      dev.off()
+    }
+  }
+  catLog('done.\n')
+  
+  return(variantsBI)
 }
 
 
 
 
 
-
-
-
 #helper function that imports the variants from a vcf file.
-varScanSNPToMut = function(files, genome='hg19') {
+vcfToPositions = function(files, genome='hg19') {
   #if more than one file, call each file separately and rbind the outputs.
   if ( length(files) > 1 ) {
     catLog('Found', length(files), 'files.', '\n')
-    return(do.call(rbind, lapply(files, function(file) varScanSNPToMut(file, genome=genome))))
+    ret = do.call(rbind, lapply(files, function(file) vcfToPositions(file, genome=genome)))
+    ret = ret[!duplicated(ret$x),]
+    return(ret)
   }
 
   catLog('Reading file ', files, '...', sep='')
   raw = read.table(files, fill=T, skip=0, row.names=NULL, header=F, as.is=T)
   raw = raw[!grepl('^#', raw$V1),]
   catLog('done.\nProcessing data...')
-  if ( nrow(raw) == 1 ) return(matrix(1, nrow=0, ncol=22))
-  raw = raw[-1,]
-  cons = strsplit(as.character(raw$V5), ':')
-  strands = strsplit(as.character(raw$V6), ':')
+  if ( nrow(raw) == 0 ) return(matrix(1, nrow=0, ncol=22))
   chrs = gsub('MT', 'M', gsub('chr', '', as.character(raw$V1)))
+  variant = sapply(strsplit(raw$V5, split=','), function(parts) c(parts, '')[1])
   ret = data.frame(
     chr = chrs,
     start = as.numeric(as.character(raw$V2)),
     end = as.numeric(as.character(raw$V2)),
     x = chrToX(chrs, as.numeric(as.character(raw$V2)), genome=genome),
-    reference = raw$V3,
-    variant = raw$V4,
-    consensus = as.character(unlist(lapply(cons, function(v) v[1]))),
-    reads = as.numeric(unlist(lapply(cons, function(v) v[2]))),
-    readsReference = as.numeric(unlist(lapply(cons, function(v) v[3]))),
-    readsVariant = as.numeric(unlist(lapply(cons, function(v) v[4]))),
-    frequency = as.numeric(gsub('%', '',as.character(unlist(lapply(cons, function(v) v[5])))))/100,
-    pValue = as.numeric(unlist(lapply(cons, function(v) v[6]))),
-    filter = as.character(unlist(lapply(strands, function(v) v[1]))),
-    referencePlus = as.numeric(unlist(lapply(strands, function(v) v[2]))),
-    referenceMinus = as.numeric(unlist(lapply(strands, function(v) v[3]))),
-    variantPlus = as.numeric(unlist(lapply(strands, function(v) v[4]))),
-    variantMinus = as.numeric(unlist(lapply(strands, function(v) v[5]))),
-    filterPValue = as.numeric(unlist(lapply(strands, function(v) v[6]))),
-    ref = as.numeric(as.character(raw$V7)),
-    het = as.numeric(as.character(raw$V8)),
-    hom = as.numeric(as.character(raw$V9)),
-    nc = as.numeric(as.character(raw$V10)), stringsAsFactors=F)
-
+    reference = raw$V4,
+    variant = variant, stringsAsFactors=F)
+  
+  ret = ret[!duplicated(ret$x),]
+  
   rownames(ret) = ret$x
   catLog('done.\n')
   
@@ -176,29 +182,18 @@ SNP2GRanges = function(SNPs, genome=genome) {
   return(GRanges(seqnames = SNPs$chr, ranges = ir, seqlengths = chrLengths(genome)))
 }
 
-#helper function that flags variants with suspicious strand distribution.
-flagStrandBias = function(SNPs) {
-  p = sapply(1:nrow(SNPs), function(row) fisher.test(matrix(
-    c(SNPs$referenceMinus[row], SNPs$variantMinus[row],
-      SNPs$referencePlus[row], SNPs$variantPlus[row]), nrow=2))$p.value)
-  p[is.na(p)] = 1
-  fdr = p.adjust(p, method='fdr')
-  
-  flag = fdr < 0.05
-  return(flag)
-}
-
 #hepler function that marks the variants in a SNPs object as db or non db SNPs.
-matchTodbSNPs = function(SNPs, dir='~/data/dbSNP', genome='hg19') {
-  SNPs$db = rep(NA, nrow(SNPs))
-  SNPs$dbValidated = rep(NA, nrow(SNPs))
-  SNPs$dbMAF = rep(NA, nrow(SNPs))
-  chrs = names(chrLengths(genome))
-  for (chr in chrs ) {
-    if ( !any(SNPs$chr == chr) ) {
-      catLog('Chromosome ', chr, ': no SNPs found in this chromosome, done.\n', sep='')
-      next
-    }
+matchTodbSNPs = function(variants, dir='~/data/dbSNP', genome='hg19') {
+
+  variants = lapply(variants, function(q) {
+    q$db = rep(F, nrow(q))
+    q$dbMAF = rep(NA, nrow(q))
+    q$dbValidated = rep(NA, nrow(q))
+    return(q)
+  })
+  
+  for (chr in names(chrLengths(genome)) ) {
+    chr = gsub('^M$', 'MT', chr)
     RsaveFile = paste0(dir,'/ds_flat_ch', chr, '.Rdata')
     if ( !file.exists(RsaveFile) ) {
       catLog('Chromosome ', chr, ': no SNP file found at', RsaveFile,'. Marking all as not dbSNP.\n', sep='')
@@ -208,24 +203,30 @@ matchTodbSNPs = function(SNPs, dir='~/data/dbSNP', genome='hg19') {
       catLog('Chromosome ', chr, ': loading db positions..')
       load(file=RsaveFile)
     }
-    catLog('matching to sample postions..')
-    chrSNPsI = which(SNPs$chr == chr)
-    varPos = SNPs$start[chrSNPsI] + ifelse(grepl('[-]', SNPs$variant[chrSNPsI]), 1, 0)
-    db = db[db$pos %in% varPos,]
-    SNPs$db[chrSNPsI] = varPos %in% db$pos
-
-    dbVal = db[db$validated,]
-    SNPs$dbValidated[chrSNPsI] = varPos %in% dbVal$pos
-
-    db = db[order(db$pos, -db$MAF),]
-    db = db[!duplicated(db$pos),]
-    dbMAF = db$MAF
-    names(dbMAF) = db$pos
-    SNPs$dbMAF[chrSNPsI][SNPs$db[chrSNPsI]] = dbMAF[as.character(varPos)][SNPs$db[chrSNPsI]]
     
-    catLog('marked ', sum(SNPs$db[chrSNPsI]), ' positions as dbSNPs.\n')
+    catLog('matching to variant postions..')
+    variants = lapply(variants, function(q) {
+      thisChr = which(xToChr(q$x) == chr)
+      if ( length(thisChr) == 0 ) return(q)
+      varPos = xToPos(q$x)[thisChr] + ifelse(grepl('[-]', q$variant[thisChr]), 1, 0)
+      dbQ = db[db$pos %in% varPos,]
+
+      q$db[thisChr] = varPos %in% dbQ$pos
+
+      dbVal = dbQ[dbQ$validated,]
+      q$dbValidated[thisChr] = varPos %in% dbVal$pos
+
+      dbQ = dbQ[order(dbQ$pos, -dbQ$MAF),]
+      dbQ = dbQ[!duplicated(dbQ$pos),]
+      dbMAF = dbQ$MAF
+      names(dbMAF) = dbQ$pos
+      q$dbMAF[thisChr][q$db[thisChr]] = dbMAF[as.character(varPos)][q$db[thisChr]]
+      return(q)
+    })
+    catLog('done.\n')
   }
-  return(SNPs)
+  
+  return(variants)
 }
 
 
@@ -234,9 +235,9 @@ matchTodbSNPs = function(SNPs, dir='~/data/dbSNP', genome='hg19') {
 
 #helper functions that counts reads in favour of reference and any present variant
 #at the given locations for the given bam files.
-importQualityScores = function(SNPs, files, BQoffset, genome='hg19', cpus=10) {
+importQualityScores = function(positions, files, BQoffset, genome='hg19', cpus=10) {
   ret=list()
-  chr = as.character(SNPs$chr)
+  chr = as.character(positions$chr)
   if ( genome == 'mm10' ) chr = paste0('chr', chr)
   for ( file in files ) {
     catLog(as.character(Sys.time()), '\n')
@@ -244,13 +245,13 @@ importQualityScores = function(SNPs, files, BQoffset, genome='hg19', cpus=10) {
     if ( cpus > 1 ) {
       listRet = mclapply(unique(chr), function(ch) {
         use = chr == ch
-        return(getQuality(file, chr[use], SNPs$start[use], BQoffset, cpus=1))
+        return(getQuality(file, chr[use], positions$start[use], BQoffset, cpus=1))
       }, mc.cores=cpus)
     }
     else {
       listRet = lapply(unique(chr), function(ch) {
         use = chr == ch
-        return(getQuality(file, chr[use], SNPs$start[use], BQoffset, cpus=1))
+        return(getQuality(file, chr[use], positions$start[use], BQoffset, cpus=1))
       })
     }
     catLog('done!\n')
@@ -485,10 +486,10 @@ solveCigars = function(cigars, seqs, quals, seqIs) {
   solutions = lapply(1:length(cigars), function(i) c(calls[i], qs[i], seqIs[i]))
   return(solutions)
 }
-QCsnps = function(pileups, SNPs, cpus=10) {
-  references = as.character(SNPs$reference)
-  variants = as.character(SNPs$variant)
-  xs = SNPs$x
+QCsnps = function(pileups, positions, cpus=10) {
+  references = as.character(positions$reference)
+  variants = as.character(positions$variant)
+  xs = positions$x
   catLog('QCing', length(pileups), 'positons...')
   catLog(as.character(Sys.time()), '\n')
   ret = mclapply(1:length(pileups), function(i) {
@@ -678,108 +679,132 @@ inGene = function(SNPs, genes, noHit = NA, genome='hg19') {
 #return the variant information for the normals on the positions that the samples are called on.
 getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, BQoffset, normalRdirectory, Rdirectory, plotDirectory, cpus, forceRedoSNPs=F, forceRedoVariants=F) {
   SNPs = variants$SNPs
+  variants = variants$variants
 
-  variantsSaveFile = paste0(Rdirectory, '/normalVariants.Rdata')
-  normalVariantsSaveFile = paste0(normalRdirectory, '/normalVariants.Rdata')
-  if ( file.exists(variantsSaveFile) & !forceRedoVariants ) {
-    catLog('Loading saved normal variants from', variantsSaveFile, '..')
-    varName = load(file=variantsSaveFile)
-    if ( varName == 'variants' ) normalVariants = variants
-    catLog('done. Loaded variants of dim', dim(normalVariants[[1]]), '\n')
-  }
-  else {
-    if ( file.exists(normalVariantsSaveFile) ) {
-      catLog('Loading saved normal variants from', normalVariantsSaveFile, '..')
-      varName = load(file=normalVariantsSaveFile)
-      if ( varName == 'variants' ) stop('Normal variants saved as @variants. Should be @normalVariants. Delete save file and rerun.')
-      catLog('done. Loaded variants of dim', dim(normalVariants[[1]]), '\n')
-    }
-    else {
-      catLog('Calculating variants:\n')
-      gc()
-      normalVariants = lapply(bamFiles, function(file) {
-        QCsnps(pileups=importQualityScores(SNPs, file, BQoffset, genome=genome, cpus=cpus)[[1]], SNPs=SNPs, cpus=cpus)})
-      names(normalVariants)=names
-      normalVariants = lapply(normalVariants, function(q) q[apply(!is.na(q), 1, any),])
-      catLog('Saving normal variants to normal folder..', sep='')
-      normalVariants = shareVariants(normalVariants)
-      for ( i in 1:length(normalVariants) )
-        normalVariants[[i]]$db = SNPs[as.character(normalVariants[[i]]$x),]$db
-      for ( i in 1:length(normalVariants) )
-        normalVariants[[i]]$dbValidated = SNPs[as.character(normalVariants[[i]]$x),]$dbValidated
-      for ( i in 1:length(normalVariants) )
-        normalVariants[[i]]$dbMAF = SNPs[as.character(normalVariants[[i]]$x),]$dbMAF
-      save(normalVariants, file=normalVariantsSaveFile)
-      catLog('done.\n')
-    }
-    
-    catLog('Adding missing variants..')
-    normalX = normalVariants[[1]]$x
-    variantX = variants[[1]]$x
-    newX = variantX[!(variantX %in% normalX)]
-    catLog(length(newX), ' new variants..', sep='')
-    if ( length(newX) > 0 ) {
-      newSNPs = SNPs[SNPs$x %in% newX,]
-      newNormalVariants = lapply(bamFiles, function(file) {
-        QCsnps(pileups=importQualityScores(newSNPs, file, BQoffset, genome=genome, cpus=cpus)[[1]], SNPs=newSNPs, cpus=cpus)})
-      newNormalVariants = shareVariants(newNormalVariants)
-      names(newNormalVariants) = names
-      newNormalVariants = lapply(newNormalVariants, function(q) q[apply(!is.na(q), 1, any),])
-      for ( i in 1:length(newNormalVariants) )
-        newNormalVariants[[i]]$db = SNPs[as.character(newNormalVariants[[i]]$x),]$db
-      for ( i in 1:length(newNormalVariants) )
-        newNormalVariants[[i]]$dbValidated = SNPs[as.character(newNormalVariants[[i]]$x),]$dbValidated
-      for ( i in 1:length(newNormalVariants) )
-        newNormalVariants[[i]]$dbMAF = SNPs[as.character(newNormalVariants[[i]]$x),]$dbMAF
-      missingColumns = colnames(normalVariants[[1]])[!(colnames(normalVariants[[1]]) %in% colnames(newNormalVariants[[1]]))]
-      if ( length(missingColumns) > 0 ) {
-        NAcolumns = do.call(cbind, lapply(missingColumns, function(colname) data.frame(rep(NA, nrow(newNormalVariants[[1]])))))
-        names(NAcolumns) = missingColumns
-        newNormalVariants = lapply(newNormalVariants, function(q) cbind(q, NAcolumns))
-      }
-      normalVariants = lapply(names, function(name) {
-        q = rbind(normalVariants[[name]], newNormalVariants[[name]])
-        q = q[order(q$x, q$variant),]
-      })
-      catLog('saving normal variants to normal folder..', sep='')
-      save(normalVariants, file=normalVariantsSaveFile)
-      catLog('done.\n')
-    }
-    catLog('Filtering out variants relevant for this batch...')
-    present = normalVariants[[1]]$x %in% variants[[1]]$x
-    normalVariants = lapply(normalVariants, function(q) q[present,])
-    catLog('done.\n')
-    
-    catLog('Saving variants..')
-    save(normalVariants, file=variantsSaveFile)
-    catLog('done.\n')
-    
-    diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
-    if ( !file.exists(diagnosticPlotsDirectory) ) dir.create(diagnosticPlotsDirectory)
-    FreqDirectory = paste0(diagnosticPlotsDirectory, '/frequencyDistribution/')
-    catLog('Plotting frequency distributions to ', FreqDirectory,'..', sep='')
-    if ( !file.exists(FreqDirectory) ) dir.create(FreqDirectory)
-    for ( sample in names(variants) ) {
-      catLog(sample, '..', sep='')
-      use = variants[[sample]]$cov > 0
-      if ( any(use) ) {
-        png(paste0(FreqDirectory, sample, '-scatter.png'), height=2000, width=4000, res=144)
-        plotColourScatter((variants[[sample]]$var/variants[[sample]]$cov)[use], variants[[sample]]$cov[use],
-                          log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
-        dev.off()
-      }
-      use = variants[[sample]]$var > 0 & !is.na(variants[[sample]]$var)
-      if ( any(use) ) {
-        png(paste0(FreqDirectory, sample, '-hist.png'), height=2000, width=4000, res=144)
-        hist(variants[[sample]]$var[use]/variants[[sample]]$cov[use], breaks=(-1:101)/100, col=mcri('blue'))
-        dev.off()
-      }
-    }
-    catLog('done.\n')
+  saveFile = paste0(Rdirectory, '/normalVariantsBI.Rdata')
+  if ( file.exists(saveFile) & !forceRedoVariants ) {
+    catLog('Loading saved variants by individual.\n')
+    load(file=saveFile)
+    return(normalVariantsBI)
   }
   
-  return(list(SNPs=SNPs, variants=normalVariants))
+
+  #iterate over normals
+  normalVariantsBI = list()
+  for ( i in 1:length(bamFiles) ) {
+    name = names(bamFiles)[i]
+    bam = bamFiles[i]
+    variantsSaveFile = paste0(Rdirectory, '/normalVariants.', name,'.Rdata')
+    if ( file.exists(variantsSaveFile) & !forceRedoVariants ) {
+      catLog('Loading saved variants for', name,'\n')
+      load(file=variantsSaveFile)
+      normalVariantsBI[[name]] = q
+      next
+    }
+
+    #extract variant information over the predetermined positions
+    catLog('Normal variants from ', name,'.\n', sep='')
+    q = QCsnps(pileups=importQualityScores(SNPs, bam, BQoffset, genome=genome, cpus=cpus)[[1]],
+               positions=SNPs, cpus=cpus)
+    q = q[!is.na(q$x),]
+    normalVariantsBI[[name]] = q
+    
+    catLog('saving variants...')
+    save(q, file=variantsSaveFile)
+    catLog('done.\n')
+  }
+  #if any variants in the cancer samples are not seen in the normals, fill up with reference calls.
+  normalVariantsBI = shareVariants(c(normalVariantsBI, variants))[1:length(normalVariantsBI)]
+
+  
+  #check db SNP for called variants.
+  normalVariantsBI = matchTodbSNPs(normalVariantsBI, dir=dbDir, genome=genome)
+  normalVariantsBI = lapply(normalVariantsBI, function(q) q[order(q$x, q$variant),])
+
+  normalVariantsBI = list('variants'=normalVariantsBI, 'SNPs'=SNPs)
+  
+  catLog('Saving variants..')
+  save(normalVariantsBI, file=saveFile)
+  catLog('done.\n')
+
+  
+  diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
+  if ( !file.exists(diagnosticPlotsDirectory) ) dir.create(diagnosticPlotsDirectory)
+  FreqDirectory = paste0(diagnosticPlotsDirectory, '/frequencyDistribution/')
+  catLog('Plotting frequency distributions to ', FreqDirectory,'..', sep='')
+  if ( !file.exists(FreqDirectory) ) dir.create(FreqDirectory)
+  for ( sample in names(normalVariantsBI$variants) ) {
+    catLog(sample, '..', sep='')
+    use = normalVariantsBI$variants[[sample]]$cov > 0
+    png(paste0(FreqDirectory, sample, '-varcov.png'), height=10, width=20, res=144, unit='in')
+    plotColourScatter((normalVariantsBI$variants[[sample]]$var/normalVariantsBI$variants[[sample]]$cov)[use],
+                      normalVariantsBI$variants[[sample]]$cov[use],
+                      log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
+    dev.off()
+    
+    use = normalVariantsBI$variants[[sample]]$var > 0
+    if ( any(use) ) {
+      pdf(paste0(FreqDirectory, sample, '-hist.pdf'), height=7, width=14)
+      hist((normalVariantsBI$variants[[sample]]$var/normalVariantsBI$variants[[sample]]$cov)[use],
+           breaks=(0:100)/100, col=mcri('blue'), main='all Variants',
+           xlab='variant frequency', ylab='number of variants')
+      cleanUse = use & normalVariantsBI$variants[[sample]]$flag == ''
+      if ( any(cleanUse) ) {
+        hist((normalVariantsBI$variants[[sample]]$var/normalVariantsBI$variants[[sample]]$cov)[cleanUse],
+             breaks=(0:100)/100, col=mcri('blue'), main='clean Variants',
+             xlab='variant frequency', ylab='number of variants')
+      }
+      cleanDbUse = cleanUse & normalVariantsBI$variants[[sample]]$db
+      if ( any(cleanDbUse) ) {
+        hist((normalVariantsBI$variants[[sample]]$var/normalVariantsBI$variants[[sample]]$cov)[cleanDbUse],
+             breaks=(0:100)/100, col=mcri('blue'), main='clean dbSNP Variants',
+             xlab='variant frequency', ylab='number of variants')
+      }
+      dev.off()
+    }
+  }
+  catLog('done.\n')
+    
+  return(normalVariantsBI)
 }
 
 
 
+xToGene = function(x, genome='hg19') {
+  catLog('Linking', length(x), 'SNV positions to genes...')
+  chr = xToChr(x, genome)
+  pos = xToPos(x, genome)
+  catLog('waiting for biomaRt/ensembl server...')
+  if ( genome == 'hg19' )
+    mart = useMart(biomart='ensembl', dataset = 'hsapiens_gene_ensembl',
+      version='Ensembl Genes', host='grch37.ensembl.org')
+  else stop('hg19 is only supported genome atm, sorry. :(')
+
+  bm = getBM(attributes=c('chromosome_name', 'start_position', 'end_position', 'hgnc_symbol', 'ensembl_transcript_id'), filters = c('chromosome_name', 'start', 'end'), value=list(chr, pos-1000, pos+1000), mart=mart)
+
+  #make sure any empty symbol entries are last, so that we can default to first hit
+  bm = bm[order(bm$hgnc_symbol, decreasing=T),]
+  #replace empty symbol entries with ensemble code and remove duplicates
+  bm$hgnc_symbol[bm$hgnc_symbol == ''] = bm$ensembl_transcript_id[bm$hgnc_symbol == '']
+  bm = bm[!duplicated(bm$hgnc_symbol),]
+
+  #match variant positions to genes ranges
+  catLog('matching ranges to positions...')
+  geneRanges = GRanges(seqnames=bm$chromosome_name, ranges = IRanges(start=bm$start_position, end=bm$end_position, names=bm$hgnc_symbol), strand='*')
+  variantRanges = GRanges(seqnames=chr, ranges = IRanges(start=pos, end=pos, names=x), strand='*')
+  OLs = as.matrix(findOverlaps(variantRanges, geneRanges, maxgap=500))
+  #remove duplicates, leaving only first hit for each variant
+  OLs = OLs[!duplicated(OLs[,1]),]
+  
+  rownames(OLs) = OLs[,1]
+
+  genes = sapply(1:length(x), function(i) {
+    rowname = as.character(i)
+    if ( rowname %in% rownames(OLs) ) return(names(geneRanges)[OLs[rowname,2]])
+    return('?')
+    })
+  if ( sum(genes == '?') > 0 ) catLog('failed', sum(genes == '?'), 'positions...')
+  catLog('done.\n')
+
+  return(genes)
+}

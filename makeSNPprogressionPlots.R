@@ -1,5 +1,3 @@
-require(WriteXLS)
-require(fields)
 
 
 #prints heatmaps and line plots of the frequency of the SNVs in the samples of the same individual
@@ -28,45 +26,34 @@ makeSNPprogressionPlots = function(variants, timeSeries, normals, plotDirectory,
 #helper function that does all the work for the frequency progression plots.
 qualityProgression = function(qs, SNPs, normal, db=T, nondb=T, excelFile='', main='') {
   catLog('Finding common variants..')
-  if ( !nondb ) qs = lapply(qs, function(q) q[q$db,])
-  if ( !db ) qs = lapply(qs, function(q) q[!q$db,])
+  if ( !('somaticP' %in% names(qs[[1]])) ) {
+    warning('no somaticQ in qs of quality progression plot. not plotting.')
+    return()
+  }
+  if ( any(sapply(qs, function(q) any(is.na(q$somaticP)))) ) {
+    warning('found NA somaticQ in qs of quality progression plot. not plotting.')
+    return()
+  }
+  if ( !nondb ) use = lapply(qs, function(q) q$db & q$somaticP <= 0.1 & q$var > 0)
+  if ( !db ) use = lapply(qs, function(q) !q$db | q$somaticP > 0.1 & q$var > 0)
+  use = apply(do.call(cbind, use), 1, any)
+  if ( sum(use) == 0 ) return()
+  qs = lapply(qs, function(q) q[use,] )
   if ( nondb & any(normal) ) {
     noisyNormals = unique(unlist(lapply(qs[normal], function(q) which(!q$db & q$cov > 0 & q$var/q$cov > 0.05))))
-    qs = lapply(qs, function(q) q[-noisyNormals,])
+    if ( length(noisyNormals) > 0 )
+      qs = lapply(qs, function(q) q[-noisyNormals,])
   }
-  common = Reduce(union, lapply(qs, rownames))
-  if ( length(common) == 0 ) return()
-  qs = lapply(qs, function(q) {
-    new = common[!(common %in% rownames(q))]
-    if ( length(new) > 0 ) {
-      x = as.numeric(gsub('[AGNTCagtcn+-].*$', '', new))
-      newQ = q[q$x %in% x,]
-      newQ = newQ[!duplicated(newQ$x),]
-      rownames(newQ) = newQ$x
-      newQ = newQ[as.character(x),]
-      newQ$var = 0
-      newQ$flag = ''
-      rownames(newQ) = new
-      newQ$variant = gsub('^[0-9]+', '', new)
-      q = rbind(q, newQ)
-      q = q[common,]
-    }
-    return(q)
-  })
-  catLog(length(common), '. Cleaning..', sep='')
+  if ( nrow(qs[[1]]) == 0 ) return()
+  catLog(nrow(qs[[1]]), '. Cleaning..', sep='')
   var = do.call(cbind, lapply(qs, function(q) q$var))
   keep = rowSums(var) > 0
   qs = lapply(qs, function(q) q[keep,])
-  common = common[keep]
-  catLog(length(common), '..', sep='')
   fs = do.call(cbind, lapply(qs, function(q) q$var/q$cov))
-  rownames(fs) = common
+  colnames(fs) = names(qs)
   cov = do.call(cbind, lapply(qs, function(q) q$cov))
-  rownames(cov) = common
   var = do.call(cbind, lapply(qs, function(q) q$var))
-  rownames(var) = common
   flag = do.call(cbind, lapply(qs, function(q) q$flag))
-  rownames(flag) = common
   f = rowSums(var)/rowSums(cov)
   fs[is.na(fs)] = -0.02
   catLog('p-values..')
@@ -88,7 +75,7 @@ qualityProgression = function(qs, SNPs, normal, db=T, nondb=T, excelFile='', mai
   hue = rep(0, length(doColour))
   hue[isRecurringGene] = as.integer(as.factor(gene[isRecurringGene]))
   hue = hue/(max(hue)+1)
-  col = D3colours(weight, importance, hue)
+  col = D3colours(weight[doColour], importance[doColour], hue[doColour])
 
   if ( sum(doColour) > 1 ) {
     catLog('plotting heatmap..')
@@ -96,11 +83,15 @@ qualityProgression = function(qs, SNPs, normal, db=T, nondb=T, excelFile='', mai
     rGcolFlag = unique(D3colours(rep(0.4, sum(isRecurringGene)), rep(0.3, sum(isRecurringGene)), hue[isRecurringGene]))
     rG = unique(gene[isRecurringGene])
     names(rGcol) = names(rGcolFlag) = rG
+    Rowv = NULL
+    if ( sum(doColour) > 1000 ) Rowv = NA
+    RSC = ifelse(gene[doColour] %in% rG, ifelse(clean[doColour],
+                rGcol[gene[doColour]], rGcolFlag[gene[doColour]]),
+      ifelse(clean[doColour], rgb(0.65, 0.65, 0.65),'grey'))
     clusterOrder =
-      heatmap(fs[doColour,,drop=F], cexCol=1, labRow=gene[doColour],
-              RowSideColors = ifelse(gene[doColour] %in% rG, ifelse(clean[doColour],
-                rGcol[gene[doColour]], rGcolFlag[gene[doColour]]), ifelse(clean[doColour], rgb(0.65, 0.65, 0.65),'grey')),
-              col=sapply((0:100)/100, function(heat) D3colours(1, heat, heat)), margins=c(8,15), scale='none', main=main)
+      heatmap(fs[doColour,,drop=F], cexCol=1, labRow=gene[doColour], Rowv=Rowv,
+              RowSideColors = RSC, col=sapply((0:100)/100, function(heat) D3colours(1, heat, heat)), margins=c(8,15),
+              scale='none', main=main)
     colorbar.plot(par('usr')[1]*0.9+par('usr')[2]*0.1, par('usr')[3]*0.5+par('usr')[4]*0.5,
                   strip.width = 0.05, strip.length = 0.4, 0:1000,
                   col=sapply((0:1000)/1000, function(heat) D3colours(1, heat, heat)), margins=c(10,5), horizontal=F)
@@ -110,39 +101,55 @@ qualityProgression = function(qs, SNPs, normal, db=T, nondb=T, excelFile='', mai
       legend('right', rG, col = rGcol, lwd=10, bg='white')
     }
     fs = fs[,clusterOrder[[2]]]
-  }
-  else catLog('skipping heatmap (no important variants)..')
-
-  N = ncol(fs)
-
-  catLog('frequency progression..')
-  is = order(importance+isRecurringGene)
-  is = is[!qs[[1]]$db[is] | importance[is] > 0]
-  plot(0, type='n', xlim=c(1, length(qs)*1.2), ylim=c(0,1), main=main)
-  segments(col(fs)[is, 1:(N-1)], fs[is, 1:(N-1)], col(fs)[is, 2:N], fs[is, 2:N], lwd=weight[is]+importance[is], col=col[is])
-  text(1:N, 1.02, colnames(fs), cex=0.7)
-
-  if ( sum(doColour) > 1 ) {
-      if ( length(rG) > 0 ) legend('right', rG, col = rGcol, lwd=3, bg='white')
-  }
-  catLog('done!\n')
-
-  if ( excelFile != '' ) {
-    catLog('Output plotted variants to', excelFile, '...')
-    colnames(fs) = names(qs)
-    multiSampleData = data.frame(
-      'gene'=gsub('.+:', '', SNPs[as.character(qs[[1]]$x[doColour]),]$inGene),
-      'chr'=SNPs[as.character(qs[[1]]$x[doColour]),]$chr,
-      'start'=qs[[1]]$x[doColour],
-      'end'=qs[[1]]$x[doColour],
-      'reference'=qs[[1]]$reference[doColour],
-      'variant'=qs[[1]]$variant[doColour],
-      'f'=fs[doColour,],
-      'cov'=cov[doColour,],
-      'var'=var[doColour,])
-    WriteXLS('multiSampleData', excelFile)
+    N = ncol(fs)
+    
+    catLog('frequency progression..')
+    plot(0, type='n', xlim=c(1, length(qs)*1.2), ylim=c(0,1), main=main)
+    segments(col(fs)[doColour, 1:(N-1)], fs[doColour,1:(N-1)],
+             col(fs)[doColour, 2:N], fs[doColour, 2:N],
+             lwd=(weight[doColour]+importance[doColour]), col=RSC)
+    text(1:N, 1.02, colnames(fs), cex=0.7)
+    if ( length(rG) > 0 )
+      legend('right', rG, col = rGcol, lwd=10, bg='white')
     catLog('done!\n')
+    
+    if ( excelFile != '' ) {
+      catLog('Output plotted variants to', excelFile, '...')    
+      multiSampleData = data.frame(
+        'gene'=gsub('.+:', '', SNPs[as.character(qs[[1]]$x[doColour]),]$inGene),
+        'chr'=SNPs[as.character(qs[[1]]$x[doColour]),]$chr,
+        'start'=xToPos(qs[[1]]$x[doColour]),
+        'end'=xToPos(qs[[1]]$x[doColour]),
+        'reference'=qs[[1]]$reference[doColour],
+        'variant'=qs[[1]]$variant[doColour],
+        'f'=fs[doColour,],
+        'cov'=cov[doColour,],
+        'var'=var[doColour,])
+      
+      if ( "severity" %in% names(qs[[1]]) ) {
+        severity = do.call(cbind, lapply(qs, function(q) q$severity[doColour]))
+        effect = do.call(cbind, lapply(qs, function(q) q$type[doColour]))
+        colToUse = apply(severity, 1, function(qSeverities) which(min(qSeverities) == qSeverities)[1])
+        severity = severity[cbind(1:nrow(severity), colToUse)]
+        effect = effect[cbind(1:nrow(effect), colToUse)]
+        multiSampleData = cbind(multiSampleData[,1:6], 'severity'=severity, 'effect'=effect,
+          multiSampleData[,7:ncol(multiSampleData)])
+      }
+      
+      write.csv(multiSampleData, gsub('.xls$', '.csv', excelFile))
+      
+      if ( nrow(multiSampleData) <= 65000 )
+        WriteXLS('multiSampleData', excelFile)
+      else {
+        multiSampleData = multiSampleData[order(multiSampleData$severity)[1:65000],]
+        WriteXLS('multiSampleData', excelFile)
+      }
+      
+      
+      catLog('done!\n')
+    }
   }
+  else catLog('skipping plots (no important variants).\n')
   
 }
 

@@ -760,11 +760,13 @@ plotPost = function(posts, i, truth=F, BG=F) {
 #helper function that returns the mcri version of the provided colour(s) if available
 #Otherwise returns the input. Call without argument to see available colours
 mcri = function(col=0, al=1) {
-  if ( col[1] == 0 ) {
+  if ( length(col) == 1 && col[1] == 'deafult' ) {
     cat('Use: mcri(\'colour\'), returning an official MCRI colour.\nAvailable MCRI colours are:\n\ndarkblue\nblue\nlightblue\nazure\ngreen\norange\nviolet\ncyan\nred\ndarkred\nmagenta (aka rose).\n\nReturning default blue.\n')
     return(mcri('blue'))
   }
-  if ( length(col) > 1 ) return(sapply(col, function(c) mcri(c, al)))
+  if ( length(col) > 1 & length(al) == 1 ) return(sapply(col, function(c) mcri(c, al)))
+  if ( length(col) == 1 & length(al) > 1 ) return(sapply(al, function(a) mcri(col, a)))
+  if ( length(col) > 1 & length(al) == length(col) ) return(sapply(1:length(col), function(i) mcri(col[i], al[i])))
   if ( is.numeric(col) ) {
     col = (col %% 9) + 1
     if ( col == 1 ) col = 'blue'
@@ -788,11 +790,12 @@ mcri = function(col=0, al=1) {
   if ( col == 'violet') ret = rgb(122/255, 82/255, 199/255, al)  
   if ( col == 'cyan') ret = rgb(0/255, 183/255, 198/255, al)  
   if ( col == 'red') ret = rgb(192/255, 80/255, 77/255, al)  
-  if ( col == 'darkred') ret = rgb(140/255, 39/255, 30/255, al)  
+  if ( col == 'darkred') ret = rgb(96/255, 40/255, 38/255, al)  
   if ( col == 'magenta' | col == 'rose') ret = rgb(236/255, 0/255, 140/255, al)
   if ( ret == 0 ) ret = do.call(rgb, as.list(c(col2rgb(col)/255, al)))
   return(ret)
 }
+
 
 bestGuess = function(fit, coefs = 0, quiet=F, cpus=1) {
   if ( !quiet ) cat('Calculating best guess...')
@@ -811,14 +814,14 @@ bestGuess = function(fit, coefs = 0, quiet=F, cpus=1) {
   return(fit)
 }
 
-XRank = function(fit, coefs = 0, verbose=F, plot=F, cpus=5) {
+XRank = function(fit, coefs = 0, keepPosterior = T, verbose=F, plot=F, cpus=5) {
   if ( coefs == 0 ) coefs = colnames(fit)
   if ( is.numeric(coefs) ) coefs = colnames(fit)[coefs]
   require(parallel)
   posts = posteriors(fit, coefs = coefs, quiet= !verbose, plot=plot, cpus=cpus, prior='empirical')
   ranks = postRank(posts, quiet = !verbose, cpus=cpus)
 
-  fit$posterior = posts$data
+  if ( keepPosterior ) fit$posterior = posts$data
   fit$prior = posts$prior
   fit$XRank = as.matrix(ranks$XRank)
   fit = bestGuess(fit, coefs = coefs, quiet = !verbose, cpus=cpus)

@@ -24,6 +24,8 @@ makeCNVplots = function(cnvs, plotDirectory, genome='hg19', forceRedoCNVplots=F)
       dev.off()
     }
 
+    
+
     #plot both
     filename = paste0(dirname, '/combined.png')
     if ( !file.exists(filename) | forceRedoCNVplots ) {
@@ -56,7 +58,7 @@ makeCNVplots = function(cnvs, plotDirectory, genome='hg19', forceRedoCNVplots=F)
 
 
 #The plotting function for CNV calls.
-plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', alpha=1, add=F, moveHet=T, pt.cex=1, ...) {
+plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', alpha=1, add=F, moveHet=T, pt.cex=1, setMargins=T, fullFrequency=F, colourDeviation=T, ...) {
   showClonality = showClonality & 'subclonality' %in% names(cR)
   if ( nrow(cR) == 0 ) return()
   if ( chr != 'all' ) {
@@ -67,36 +69,56 @@ plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', al
   }
   else xlim=c(min(cR$x1), max(cR$x2))
   xlimMar = xlim
-  xlimMar[1] = xlim[1] - (xlim[2]-xlim[1])*0.01
-  xlimMar[2] = xlim[2] + (xlim[2]-xlim[1])*0.01
+  xlimMar[1] = xlim[1] - (xlim[2]-xlim[1])*0.05
+  xlimMar[2] = xlim[2] + (xlim[2]-xlim[1])*0.05
 
   ylim = c(-2.3, 1.1)
   if ( !showClonality ) ylim = c(-1.1, 1.1)
   if ( !add ) {
-    par(oma=rep(0, 4))
-    par(mar=c(0, 0, 0, 0))
+    if ( setMargins ) {
+      par(oma=rep(0, 4))
+      par(mar=c(0, 0, 0, 0))
+    }
     plot(0, xlim=xlimMar, ylim=ylim, type='n', xlab='', ylab='', axes=F, ...)
-    segments(xlim[1], c(0.1,0.6,0.6+log2(1.5)/2,1.1, -0.1,-1.1+2/3, -0.6, -1.1),
-             xlim[2], c(0.1,0.6,0.6+log2(1.5)/2,1.1, -0.1,-1.1+2/3, -0.6, -1.1), lwd=3,
-             col=c(rgb(0,0,0,0.3), rgb(0,0.8,0,0.3), rgb(1,0.5,0,0.3), rgb(1,0,0,0.3),
-               rgb(0,0.8,0,0.3), rgb(1,0.5,0,0.3), rgb(1,0,0,0.3), rgb(0,0,0, 0.3)))
-    text(xlim[2] + (xlim[2]-xlim[1])*0.005, c(0.1,0.6,0.6+log2(1.5)/2,1.1, -0.1,-1.1+2/3, -0.6, -1.1),
-         c('1 chr', '2 chr', '3 chr', '4 chr', '50%', '33%', '25%', '0%'), adj=0, cex=0.7,
-         col=c(rgb(0,0,0,0.3), rgb(0,0.8,0,0.3), rgb(1,0.5,0,0.3), rgb(1,0,0,0.3),
-           rgb(0,0.8,0,0.3), rgb(1,0.5,0,0.3), rgb(1,0,0,0.3), rgb(0,0,0, 0.3)))
-    text(xlimMar[1] - (xlimMar[2]-xlimMar[1])*0.032, 0.6, srt=90, 'LFC coverage', cex=0.8)
-    text(xlimMar[1] - (xlimMar[2]-xlimMar[1])*0.032, -0.6, srt=90, 'MAF', cex=0.8)
-    text(xlimMar[1] - (xlimMar[2]-xlimMar[1])*0.032, -1.8, srt=90, 'clonality', cex=0.8)
+    if ( fullFrequency ) {
+      lineA = 0.3
+      labelA = 1
+      lineY = c(0.1,0.6,0.6+log2(1.5)/2,1.1, -0.1,-1.1+2/3, -0.6,-1.1+1/3,-1.1)
+      lineCol = c(rgb(0,0,0,lineA), rgb(0,0.8,0,lineA), rgb(1,0.5,0,lineA), rgb(1,0,0,lineA),
+        rgb(0,0,0,lineA), rgb(1,0.5,0,lineA), rgb(1,0,0,lineA), rgb(1,0.5,0,lineA), rgb(0,0,0, lineA))
+      labelCol = c(rgb(0,0,0,labelA), rgb(0,0.8,0,labelA), rgb(1,0.5,0,labelA), rgb(1,0,0,labelA),
+        rgb(0,0,0,labelA), rgb(1,0.5,0,labelA), rgb(1,0,0,labelA), rgb(1,0.5,0,labelA), rgb(0,0,0, labelA))
+      lineName = c('1 chr', '2 chr', '3 chr', '4 chr', '100%', '67%', '50%', '33%', '0%')
+      lowerLabel = 'allele frequency'
+      lowerTicks = c(0, 0.2, 0.4, 0.6, 0.8, 1)
+    }
+    else {
+      lineA = 0.3
+      labelA = 1
+      lineY = c(0.1,0.6,0.6+log2(1.5)/2,1.1, -0.1,-1.1+2/3, -0.6, -1.1)
+      lineCol = c(rgb(0,0,0,lineA), rgb(0,0.8,0,lineA), rgb(1,0.5,0,lineA), rgb(1,0,0,lineA),
+        rgb(0,0.8,0,lineA), rgb(1,0.5,0,lineA), rgb(1,0,0,lineA), rgb(0,0,0, lineA))
+      labelCol = c(rgb(0,0,0,labelA), rgb(0,0.8,0,labelA), rgb(1,0.5,0,labelA), rgb(1,0,0,labelA),
+        rgb(0,0.8,0,labelA), rgb(1,0.5,0,labelA), rgb(1,0,0,labelA), rgb(0,0,0, labelA))
+      lineName = c('1 chr', '2 chr', '3 chr', '4 chr', '50%', '33%', '25%', '0%')
+      lowerLabel = 'SNP MAF'
+      lowerTicks = c(0, 0.1, 0.2, 0.3, 0.4, 0.5)
+    }
+    segments(xlim[1], lineY, xlim[2], lineY, lwd=3, col=lineCol)
+    text(xlim[2] + (xlim[2]-xlim[1])*0.005, lineY, lineName, adj=0, cex=1, col=labelCol)
+    text(xlimMar[1] - (xlimMar[2]-xlimMar[1])*0.03, 0.6, srt=90, 'coverage LFC vs normals', cex=0.8)
+    text(xlimMar[1] - (xlimMar[2]-xlimMar[1])*0.03, -0.6, srt=90, lowerLabel, cex=0.8)
+    text(xlimMar[1] - (xlimMar[2]-xlimMar[1])*0.03, -1.8, srt=90, 'clonality', cex=0.8)
     addChromosomeLines(ylim=c(-2.3, 1.15), col=mcri('green', 0.6), lwd=1, genome=genome)
     segments(2*xlim[1]-xlim[2], c(0, -1.2), 2*xlim[2]-xlim[1], c(0, -1.2), lwd=5)
-    axis(side=2, at=0.1 + (0:4)/4, labels=c(-1, -0.5, 0, 0.5, 1), line=-3)
-    axis(side=2, at=-1.1 + (0:5)/5, labels=c(0, 0.1, 0.2, 0.3, 0.4, 0.5), line=-3)
-    axis(side=2, at=-2.3 + (0:5)/5, labels=c(0, 0.2, 0.4, 0.6, 0.8, 1), line=-3)
+    axis(side=2, at=0.1 + (0:4)/4, labels=c(-1, -0.5, 0, 0.5, 1), pos=xlim[1])
+    axis(side=2, at=-1.1 + (0:5)/5, labels=lowerTicks, pos=xlim[1])
+    axis(side=2, at=-2.3 + (0:5)/5, labels=c(0, 0.2, 0.4, 0.6, 0.8, 1), pos=xlim[1])
   }
   
   x = (cR$x1 + cR$x2)/2
   y = 0.6+cR$M/2
-  col = rgb(pmin(1,pmax(0,-2*cR$M)),0,pmin(1,pmax(0,2*cR$M)), alpha)
+  col = rgb(pmin(1,pmax(0,2*cR$M))*colourDeviation,0,pmin(1,pmax(0,-2*cR$M))*colourDeviation, alpha)
   width = sqrt(cR$width^2+systematicVariance()^2)
   lfcCex = pt.cex*pmax(0.2, pmin(3, sqrt(0.1/width)))
   points(x, pmax(0, y), cex=lfcCex, col=col, pch=16)
@@ -105,20 +127,20 @@ plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', al
   tooHigh = y > 1.2
   tooLow = y < 0
   if ( any(tooHigh) ) {
-    arrows(x[tooHigh], 1.12, x[tooHigh], 1.18, lwd=2, length=0.1, col=rgb(0,0,1,alpha))
-    text(x[tooHigh], 1.09, round(cR$M[tooHigh],2), cex=0.8, col=rgb(0,0,1,alpha))
+    arrows(x[tooHigh], 1.12, x[tooHigh], 1.18, lwd=2, length=0.1, col=rgb(1*colourDeviation,0,0,alpha))
+    text(x[tooHigh], 1.09, round(cR$M[tooHigh],2), cex=0.8, col=rgb(1*colourDeviation,0,0,alpha))
   }
   if ( any(tooLow) ) {
-    arrows(x[tooLow], 0.11, x[tooLow], 0.05, lwd=2, length=0.1, col=rgb(1,0,0,alpha))
-    text(x[tooLow], 0.14, round(cR$M[tooLow],2), cex=0.8, col=rgb(1,0,0,alpha))
+    arrows(x[tooLow], 0.11, x[tooLow], 0.05, lwd=2, length=0.1, col=rgb(0,0,1*colourDeviation,alpha))
+    text(x[tooLow], 0.14, round(cR$M[tooLow],2), cex=0.8, col=rgb(0,0,1*colourDeviation,alpha))
   }
 
   xf = (cR$x1+cR$x2)[cR$cov > 0]/2
   cRf = cR[cR$cov > 0,]
   f = refUnbias(cRf$var/cRf$cov)
-  if ( 'f' %in% colnames(cR) ) f = cR$f[cR$cov > 0]
+  if ( 'f' %in% colnames(cR) ) f = cRf$f
   yf = -1.1 + 2*f
-  if ( 'ferr' %in% names(cR) ) ferr = cR$ferr
+  if ( 'ferr' %in% names(cR) ) ferr = cRf$ferr
   else ferr = 2*sqrt(cRf$var)/cRf$cov
   fCex = pt.cex*pmax(0.2, pmin(3, sqrt(0.025/ferr)))
   #plot the average MAFs, opaqueness from how likely a non-het is.
@@ -129,8 +151,14 @@ plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', al
     pHet = rep(0, length(pHet))
     pHet[cRf$call %in% c('AB', 'CL', 'AABB')] = 1
   }
-  if ( moveHet ) col = rgb(pmax(0,pmin(1, 4*(0.5-f))),0,0, (1-pHet)*alpha)
-  else col = rgb(pmax(0,pmin(1, 4*(0.5-f))),0,0, alpha)
+  if ( moveHet ) col = rgb(pmax(0,pmin(1, 4*(0.5-f)))*colourDeviation,0,0, (1-pHet)*alpha)
+  else col = rgb(pmax(0,pmin(1, 4*(0.5-f)))*colourDeviation,0,0, alpha)
+  if ( fullFrequency ) {
+    xf = rep(xf, 2)
+    yf = c(-1.1 + f, -0.1 - f)
+    col = rep(col, 2)
+    ferr = rep(ferr, 2)
+  }
   points(xf, yf, cex=fCex, pch=16, col=col)
   if ( errorBars ) segments(xf, pmin(-0.1, yf+ferr), xf, pmax(-1.1, yf-ferr), col=col, lwd=fCex)
   segments(cRf$x1, yf, cRf$x2, yf, lwd=fCex, col=col)
@@ -138,10 +166,15 @@ plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', al
   if ( moveHet ) {
     col = rgb(0,0,0, pHet*alpha)
     yf = rep(-0.1, length(xf))
+    if ( fullFrequency ) {
+      xf = (cR$x1+cR$x2)[cR$cov > 0]/2
+      yf = rep(-0.6, length(xf))
+      ferr = ferr[1:length(yf)]
+    }
     points(xf, yf, cex=fCex, pch=16, col=col)
     if ( errorBars ) segments(xf, pmin(-0.1, yf+ferr), xf, pmax(-1.1, yf-ferr), col=col, lwd=fCex)
+    segments(cRf$x1, yf, cRf$x2, yf, lwd=fCex, col=col)
   }
-  segments(cRf$x1, yf, cRf$x2, yf, lwd=fCex, col=col)
 
   if ( 'call' %in% colnames(cR) ) {
     called = which(cR$call != 'AB')
@@ -200,3 +233,8 @@ randomCols = function(i, a=1, noBlack=F) {
 }
 
 
+#helper function that restores default margins
+resetMargins = function() {
+  par(oma=c(0,0,0,0))
+  par(mar=c(4,4,3,1))
+}

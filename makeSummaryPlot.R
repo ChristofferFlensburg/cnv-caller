@@ -5,10 +5,10 @@
 makeSummaryPlot = function(variants, cnvs, normals, individuals, timePoints, plotDirectory, genome='hg19', cpus=1, forceRedo=F, plotName='summary') {
   summaryDirectory = paste0(plotDirectory, '/summary/')
   if ( !file.exists(summaryDirectory) ) dir.create(summaryDirectory)
-  plotFile = paste0(summaryDirectory, '/', plotName, '.jpg')
+  plotFile = paste0(summaryDirectory, '/', plotName, '.png')
   if ( !file.exists(plotFile) | forceRedo ) {
     catLog('Making summary plot..')
-    jpeg(plotFile, width=20, height=10, res=300, units='in')
+    png(plotFile, width=20, height=10, res=300, units='in')
     plotSummary(variants, cnvs, normals, individuals, timePoints, genome, cpus)
     dev.off()
     for ( chr in names(chrLengths(genome)) ) {
@@ -72,8 +72,13 @@ plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome,
       n = which(individuals == ind)[1]
       q = variants$variants[[n]]
       use = q$somaticP > 0.5
+      if ( 'severity' %in% names(q) )
+        use = q$somaticP > 0.5 &
+             (is.na(q$germline) | !q$germline) &
+             (is.na(q$severity) | q$severity < 11)
       q = q[use,]
       points(q$x, rep(iToY[n]-0.75, sum(use)), pch=19, cex=1.2*sqrt(q$var/q$cov), col=rgb(0,0,0,pmin(1,sqrt(q$cov/100))))
+      genes[[names(cnvs)[n]]] = unique(variants$SNPs[as.character(q$x),]$inGene)
       next
     }
     #set up information common for all indiviuals
@@ -90,7 +95,12 @@ plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome,
 
     #loop over samples for each individual
     for ( col in 1:ncol(var) ) {
-      use = qs[[col]]$somaticP > 0.5
+      use = qs[[col]]$somaticP > 0.5 & (!qs[[col]]$germline | is.na(qs[[col]]$germline))
+      if ( sum(use) == 0 ) next
+      if ( 'severity' %in% names(qs[[col]]) )
+        use = qs[[col]]$somaticP > 0.5 &
+             (is.na(qs[[col]]$germline) | !qs[[col]]$germline) &
+             (is.na(qs[[col]]$severity) | qs[[col]]$severity < 11)
       
       p = unlist(mclapply(which(use), function(row)
         pBinom(cov[row,col], var[row,col], sum(var[row,-col])/sum(cov[row,-col])),
@@ -113,34 +123,41 @@ plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome,
 
   #Highlight reccuring genes
   allGenes = Reduce(union, genes)
-  geneCounts = Reduce('+', lapply(genes, function(gs) allGenes %in% gs))
+  geneCounts = sapply(allGenes, function(gene) length(unique(individuals[sapply(genes, function(gs) gene %in% gs)])))
   names(geneCounts) = allGenes
   i = 0
   print = allGenes[geneCounts > i]
-  while( length(print) > 30 ) {
+  while( length(print) > 30 & sum(geneCounts > i+1) > 5 ) {
     i = i+1
     print = allGenes[geneCounts > i]
   }
   if ( length(print) > 0 ) {
-    differentIndividuals = sapply(print, function(gene) length(unique(individuals[unlist(lapply(genes, function(gs) gene %in% gs))]))) > 1
     for ( name in names(cnvs) ) {
       q = variants$variants[[name]]
       
-      use = q$somaticP > 0.5
+      use = q$somaticP > 0.5 & (!q$germline | is.na(q$germline))
+      if ( 'severity' %in% names(q) )
+        use = q$somaticP > 0.5 &
+             (is.na(q$germline) | !q$germline) &
+             (is.na(q$severity) | q$severity < 11)
+
       is = which(variants$SNPs$x %in% q$x) 
       use[use] = variants$SNPs[is,][as.character(q$x[use]),]$inGene %in% print
       if ( sum(use) == 0 ) next
       q = q[use,]
       n = which(names(cnvs) == name)
-      segments(q$x, rep(iToY[n]-0.65, sum(use)), q$x, rep(iToY[n]-0.85, sum(use)), lwd=0.5)
+      segments(q$x, rep(iToY[n]-0.6, sum(use)), q$x, rep(iToY[n]-0.9, sum(use)), lwd=0.5)
     }
     
     geneX = sapply(print, function(gene) mean(variants$SNPs$x[variants$SNPs$inGene == gene]))
-    textX = seq(from=xmin, to=xmax, along.with=print)
+    x = sort(geneX)
+    #textX = seq(from=xmin, to=xmax, along.with=print)
+    textX = -spreadPositions(-x, xmax/50)
     textY = rep(c(-0.55, -0.85, -1.15, -1.45), length(print))[1:length(print)] - 0.2
-    segments(textX, textY+0.2, sort(geneX), -0.1, col=rgb(0.8, 0.8, 0.8))
-    text(textX, textY, print[order(geneX)], cex=0.7)
-    text(xmax + (xmax-xmin)*0.12, -1, paste0('<-- somatic SNV in more than ',i,' samples.'))
+    segments(textX, textY+0.2, x, -0.1, col=rgb(0.8, 0.8, 0.8))
+    label = paste0(print, ' (', geneCounts[print], ')')
+    text(textX, textY, label[order(geneX)], cex=0.7)
+    text(xmax + (xmax-xmin)*0.12, -1, paste0('<-- somatic SNV in more than ',i,' patients.'))
   }
 
   legend('right', c('somatic point mutation', '50% frequency', '100% frequency', 'new mutation', 'increasing mutation', 'decreasing mutation',
@@ -151,6 +168,17 @@ plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome,
   
   if ( length(print) > 0 ) invisible(print[order(geneX)])
   invisible(c())
+}
+
+#spreads out positions. useful for plotting labels
+spreadPositions = function(x, d) {
+  ord = order(x)
+  prevX = -Inf
+  for ( i in ord ) {
+    if ( x[i] < prevX+d ) x[i] = prevX+d
+    prevX = x[i]
+  }
+  return(x)
 }
 
 #scalar product of the two normalsied vectors x and y.

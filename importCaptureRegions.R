@@ -1,20 +1,37 @@
 
-#import a capture region with gc content and gene names.
-importCaptureRegions = function(file='captureRegions.gc.bed', genome='hg19', gcColumn=5) {
-  require(rtracklayer)
-  cR = read.table(file, fill=T, quote='')
+#' Imports capture regions from a bed file with GC information.
+#'
+#' @param file Bedfile of the capture regions with extra columns for gc and binding strength information.
+#' @param genome Which genome the bed file is on. 'hg19' and 'mm10' only supported atm.
+#' @param gcColumn the column in the bed file that contains the gc content. Default 5 matches output from the provided script at X.
+#' @param dnColumn the column in the bed file that contains the binding strength. Default 6 matches output from the provided script at X.
+#'
+#' @details Reads in the bed file into GRanges format, with extra columns for GC and binding strength.
+#'
+#' @export
+#' @examples
+#' captureRegions = importCaptureRegions('path/to/my/captureRegions.bed')
+#' plotColourScatter(captureRegions$gc, captureRegions$dn, xlab='GC content', ylab='binding strength')
+#'
+importCaptureRegions = function(bedFile, fastaFile, genome='hg19') {
+  if ( !grepl('\\.bed$', bedFile) ) stop('Need .bed capture regions.')
+  bsFile = gsub('\\.bed$', '.dn.bed', bedFile)
+  if ( !file.exists(bsFile) ) {
+    catLog('Couldt find a binding strength file at ', bsFile, ' Making one now.\n')
+    if ( fastaFile == '' ) stop('Need a fastaFile entry in the input files to calcuate binding strengths.')
+    addBindingStrength(bedFile, fastaFile)
+  }
+  catLog('Loading capture regions...')
+  cR = read.table(bsFile, fill=T, quote='')
   chrL = chrLengths(genome)
   use = gsub('chr', '',cR$V1) %in% names(chrL)
   cR = cR[use,]
-  if ( is.na(gcColumn) )
-    gr = GRanges(ranges = IRanges(start=cR$V2, end = cR$V3),
-      seqnames=gsub('chr', '',cR$V1), seqlengths=chrL, region = gsub(',', '', gsub("\"", '', as.character(cR$V4))))
-  else
-    gr = GRanges(ranges = IRanges(start=cR$V2, end = cR$V3),
-      seqnames=gsub('chr', '',cR$V1), seqlengths=chrL, region = gsub(',', '', gsub("\"", '', as.character(cR$V4))),
-      gc = cR[[gcColumn]])
+  gr = GRanges(ranges = IRanges(start=cR$V2, end = cR$V3),
+    seqnames=gsub('chr', '',cR$V1), seqlengths=chrL, region = gsub(',', '', gsub("\"", '', as.character(cR$V4))),
+    gc = cR[[5]], dn = cR[[6]])
 
   names(gr) = gr$region
+  catLog('done.\n')
   return(gr)
 }
 
@@ -55,4 +72,46 @@ chrLengths = function(genome='hg19') {
   if ( genome == 'hg19' ) return(humanChrLengths())
   else if ( genome == 'mm10' ) return(mouseChrLengths())
   else stop('chrLengths doesnt know about genome', genome, '\n')
+}
+
+
+makeCaptureFromFeatureCountRegions = function(outputBed, genome='hg19') {
+  ann = getInBuiltAnnotation('hg19')
+  entrezGenes = unique(ann$GeneID)
+  library(mygene)
+  genes1 = queryMany(entrezGenes[1:10000], species='human')
+  genes2 = queryMany(entrezGenes[10001:20000], species='human')
+  genes3 = queryMany(entrezGenes[20001:length(entrezGenes)], species='human')
+  genes = rbind(as.data.frame(genes1, stringsAsFactors=F), as.data.frame(genes2, stringsAsFactors=F), as.data.frame(genes3, stringsAsFactors=F))
+
+  symbol = genes$symbol
+  symbol[is.na(symbol)] = genes$query[is.na(symbol)]
+  names(symbol) = genes$query
+
+  chr = annotationToChr(ann)
+  start = ann$Start
+  end = ann$End
+  x1x2 = annotationToX1X2(ann)
+  x1 = xToPos(x1x2$x1, genome)
+  x2 = xToPos(x1x2$x2, genome)
+  ret = rbind(chr, start, pmax(start, end), symbol[as.character(ann$GeneID)])
+  ret = ret[,ret[1,] %in% names(chrLengths(genome))]
+
+  write(ret, file=outputBed, sep='\t', ncolumns=4)
+}
+
+
+padCaptureRegions = function(inFile, outFile=gsub('.bed$', '.padded.bed', inFile), padding=100) {
+  if ( file.exists(outFile) ) return()
+  cr = importCaptureRegions(inFile, gcColumn=3, dnColumn=3)
+  outDF = data.frame(seqnames(cr), pmax(1, start(cr)-padding), pmin(end(cr)+padding), names(cr))
+  temp = options()$scipen
+  options(scipen = 100)
+  write.table(outDF, file=outFile, quote=F, col.names=F, row.names=F)
+  options(scipen = temp)
+}
+
+
+nameCaptureRegions = function(inFile, outFile, genome=100) {
+  
 }

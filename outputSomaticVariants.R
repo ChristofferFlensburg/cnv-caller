@@ -1,4 +1,3 @@
-require(WriteXLS)
 
 
 #prints the somatic variants to an excel sheet.
@@ -29,14 +28,14 @@ outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, run
         nIns = nchar(variant[grepl('\\+', variant)])-1
         variant[grepl('\\+', variant)] = paste0(reference[grepl('\\+', variant)], gsub('\\+', '', variant[grepl('\\+', variant)]))
       }
-      
+
       somatic = data.frame(
         chr=xToChr(q$x, genome),
         start=xToPos(q$x, genome),
         end=end,
         reference=reference,
         variant=variant,
-        inGene=SNPs[as.character(q$x),]$inGene,
+        inGene=gsub('.+:', '', SNPs[as.character(q$x),]$inGene),
         severity=if ( 'severity' %in% names(q) ) q$severity else rep('na', nrow(q)),
         effect=if ( 'type' %in% names(q) ) q$type else rep('notChecked', nrow(q)),
         f=q$var/q$cov,
@@ -47,14 +46,18 @@ outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, run
         pbq=q$pbq,
         pmq=q$pmq,
         psr=q$psr,
-        somaticP=q$somaticP,
+        somaticScore=q$somaticP,
         germlineLike=ifelse(is.na(q$germline), 'na', ifelse(q$germline, 'YES', '')),
+        dbSNP=ifelse(q$db, 'dbSNP', ''),
+        dbMAF=if ( 'dbMAF' %in% names(q) ) q$dbMAF else rep('na', nrow(q)),
+        dbValidated=if ( 'dbValidated' %in% names(q) ) q$dbValidated else rep('na', nrow(q)),
         row.names=rownames(q))
       if ( 'severity' %in% names(q) ) ord = order(q$severity + 10*q$germline)
       else ord = order(10*q$germline)
       somatic = somatic[ord,]
       somatics[[sample]] = somatic
     }
+    catLog('writing to xls...')
     WriteXLS('somatics', outfile)
     catLog('done!\n')
 
@@ -63,15 +66,16 @@ outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, run
     catLog('Outputting to directory ', vcfDir, '..')
     for ( name in names(somatics) ) {
       somatic = somatics[[name]]
-      somatic = somatic[somatic$somaticP > 0.5,]
       outfile = paste0(vcfDir, '/', name, '.txt')
       catLog(basename(outfile), '..', sep='')
       if ( nrow(somatic) > 0 ) {
+        options(scipen=999)
         mx = cbind(as.character(somatic$chr),
           as.character(somatic$start), as.character(somatic$end),
           paste0(as.character(somatic$reference), '/', as.character(somatic$variant)),
           rep('+', nrow(somatic)), as.character(1:nrow(somatic)))
-        write(t(mx), file=outfile, sep='\t', ncolumns=ncol(mx))        
+        write(t(mx), file=outfile, sep='\t', ncolumns=ncol(mx))
+        options(scipen=5)
       }
       else
         write('No somatic mutations detected.', file=outfile, sep='\t')

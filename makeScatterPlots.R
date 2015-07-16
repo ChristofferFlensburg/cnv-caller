@@ -18,17 +18,17 @@ makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, ge
       ps=qualityScatter(q1, q2, variants$SNPs, cpus=cpus, verbose=F)
       psuf=qualityScatter(q1, q2, variants$SNPs, cpus=cpus, plotFlagged=F, verbose=F)
       
-      outfile = paste0(dir2, '/all.jpg')
+      outfile = paste0(dir2, '/all.png')
       catLog('Plotting to', outfile, '\n')
-      jpeg(outfile, width = 10, height=10, res=300, units='in')
+      png(outfile, width = 10, height=10, res=300, units='in')
       qualityScatter(q1, q2, variants$SNPs, verbose=F, ps=psuf, plotFlagged=F,
                      main=paste0('clean variants: ', pair[1], ' vs ', pair[2]),
                      xlab=paste0('variant frequency for ', pair[1], ' (', timePoints[pair[1]], ')'),
                      ylab=paste0('variant frequency for ', pair[2], ' (', timePoints[pair[2]], ')'), cpus=1)
       dev.off()
       
-      outfile = paste0(dir2, '/allNamed.jpg')
-      jpeg(outfile, width = 10, height=10, res=300, units='in')
+      outfile = paste0(dir2, '/allNamed.png')
+      png(outfile, width = 10, height=10, res=300, units='in')
       qualityScatter(q1, q2, variants$SNPs, verbose=F, ps=psuf, plotFlagged=F,
                      main=paste0('clean variants: ', pair[1], ' vs ', pair[2]),
                      xlab=paste0('variant frequency for ', pair[1], ' (', timePoints[pair[1]], ')'),
@@ -36,8 +36,8 @@ makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, ge
                      print=T, printRedCut=0.25)
       dev.off()
 
-      outfile = paste0(dir2, '/allFlagged.jpg')
-      jpeg(outfile, width = 10, height=10, res=300, units='in')
+      outfile = paste0(dir2, '/allFlagged.png')
+      png(outfile, width = 10, height=10, res=300, units='in')
       qualityScatter(q1, q2, variants$SNPs, verbose=F, ps=ps,
                      main=paste0('all variants: ', pair[1], ' vs ', pair[2]),
                      xlab=paste0('variant frequency for ', pair[1], ' (', timePoints[pair[1]], ')'),
@@ -48,8 +48,8 @@ makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, ge
       chrs = xToChr(q1$x, genome=genome)
       catLog('done!\n  Plotting chr:')
       for ( chr in names(chrLengths(genome)) ) {
-        outfile = paste0(dir2, '/chr', chr, '.jpg')
-        jpeg(outfile, width = 10, height=10, res=300, units='in')
+        outfile = paste0(dir2, '/chr', chr, '.png')
+        png(outfile, width = 10, height=10, res=300, units='in')
         catLog(chr, '..', sep='')
         use = chrs == chr
         qualityScatter(q1[use,], q2[use,], variants$SNPs, ps=ps[use],
@@ -67,7 +67,7 @@ makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, ge
 
 #helper function that generates fancy scatter plots of the frequencies of two samples.
 #Requires two variants objects, and a SNPs object.
-qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCov=10, main='', xlab='variant frequency: sample1', ylab='variant frequency: sample2', plotFlagged=T, cpus=1, verbose=T, print = F, printRedCut = 0.99, printOnlyNovel=F, plotPosition=F, genome='hg19', xlim=c(0,1), ylim=c(0,1), outputHighlighted=F, frame.plot=F, legend=T, redCut=0.75, ...) {
+qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCov=10, main='', xlab='variant frequency: sample1', ylab='variant frequency: sample2', plotFlagged=T, cpus=1, verbose=T, print = F, printRedCut = 0.99, printOnlyNovel=F, plotPosition=F, genome='hg19', xlim=c(0,1), ylim=c(0,1), outputHighlighted=F, frame.plot=F, legend=T, redCut=0.75, forceCol=NA, add=F, GoI=c(), printCex=1, ...) {
   use = q1$var > 0 | q2$var > 0
   q1 = q1[use,]
   q2 = q2[use,]
@@ -76,12 +76,18 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
   freq2 = q2$var/q2$cov
   freq2[is.na(freq2)] = -0.02
 
-  x = as.character(q1$x)
-  keep = SNPs$x %in% x
+  temp = options()$scipen
+  options(scipen = 100)
+  xChar = as.character(q1$x)
+  SNPs = SNPs[!duplicated(SNPs$x),]
+  SNPxChar = as.character(SNPs$x)
+  rownames(SNPs) = SNPxChar
+  options(scipen = temp)
+  keep = SNPs$x %in% q1$x
   if ( sum(keep) == 0 ) return()
   SNPs = SNPs[keep,]
-  SNPs = SNPs[x,]
-  db = SNPs$db
+  SNPs = SNPs[xChar,]
+  db = q1$db
   flag1 = q1$flag
   flag2 = q2$flag
 
@@ -110,18 +116,20 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
     freq2[is.na(freq2)] = -0.02
     x = as.character(q1$x)
     SNPs = SNPs[clean,]
-    db = db[clean]
+    db = q1$db
     clean = rep(T, nrow(q1))
   }
 
   if ( is.na(ps[1]) ) {
+    doP = which(q1$cov >= max(1, minCov) & q2$cov >= max(1, minCov))
     if ( cpus == 1 )
-      ps = sapply(1:nrow(q1), function(i) fisher.test(matrix(c(q1$ref[i], q1$var[i], q2$ref[i], q2$var[i]), nrow=2))$p.value)
+      psCov = sapply(doP, function(i) fisher.test(matrix(c(q1$ref[i], q1$var[i], q2$ref[i], q2$var[i]), nrow=2))$p.value)
     else {
-      require(parallel)
-      ps = unlist(mclapply(as.list(1:nrow(q1)), function(i)
+      psCov = unlist(mclapply(doP, function(i)
         fisher.test(matrix(c(q1$ref[i], q1$var[i], q2$ref[i], q2$var[i]), nrow=2))$p.value, mc.cores=cpus))
     }
+    ps = rep(1, nrow(q1))
+    ps[doP] = psCov
     names(ps) = rownames(q1)
   }
   dof = max(20, sum(clean & freq1+freq2 > 0 & freq1+freq2 < 2))
@@ -134,13 +142,16 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
   col = rep('black', length(red))
   col[!clean&use] = rgb(0.6 + red[!clean&use]*0.4, 0.6+red[!clean&use]*0.2, 0.6)
   col[clean&use] = rgb(red,0,ifelse(db, 0,(1-red)))[clean&use]
+  if ( !is.na(forceCol) ) col = rep(forceCol[1], length(col))
   cex = pmin(maxCex, sqrt(sqrt(q1$cov*q2$cov)/covScale))
   if ( 'germline' %in% names(q1) ) pch = ifelse(clean, ifelse(db, 4, ifelse(q1$germline & !is.na(q1$germline), 3, 19)), ifelse(db, 4, 1))
   else pch = ifelse(clean, ifelse(db, 4, 19), ifelse(db, 4, 1))
-  plot(1, type='n', xlim=xlim, ylim=ylim, xlab = xlab, ylab = ylab, main=main, frame.plot=frame.plot, ...)
-  segments(c(0,1,0,0,0, 0.5, 0), c(0,0, 0,1,0, 0, 0.5), c(0, 1, 1, 1, 1, 0.5, 1), c(1, 1, 0, 1, 1, 1, 0.5), col = rgb(0.8, 0.8, 0.8), lwd=0.3)
+  if ( !add ) {
+    plot(1, type='n', xlim=xlim, ylim=ylim, xlab = xlab, ylab = ylab, main=main, frame.plot=frame.plot, ...)
+    segments(c(0,1,0,0,0, 0.5, 0), c(0,0, 0,1,0, 0, 0.5), c(0, 1, 1, 1, 1, 0.5, 1), c(1, 1, 0, 1, 1, 1, 0.5), col = rgb(0.8, 0.8, 0.8), lwd=0.3)
+  }
   if ( !plotPosition ) {
-    if ( legend ) {
+    if ( legend & !add ) {
       if ( plotFlagged )
         legend('bottomright', c('clean non-db', 'flagged non-db', 'clean germline-like non-db', 'clean db', 'flagged db', 'significantly different', 'high coverage', 'low coverage', 'severe effect'), pch=c(19, 1, 3, 4, 4, 19, 19, 19, 1), col=c('blue', 'grey', 'blue', 'black', 'grey', 'red', 'black', 'black', 'orange'), pt.cex=c(1,1,1,1,1,1,1,0.3, 1.5), bg='white')
       else
@@ -154,7 +165,7 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
 
   if ( 'severity' %in% names(q1) & 'severity' %in% names(q2) ) {
     severity = pmin(q1$severity, q2$severity)
-    severe = clean & use & severity <= 6 & !db
+    severe = clean & use & severity <= 11 & !db
     points(freq1[severe], freq2[severe], cex=cex[severe]+(8-severity[severe])/10,
            lwd=(8-severity[severe])/2, pch=1, col='orange')
   }
@@ -181,12 +192,14 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
 
   if ( print ) {
     toPrint = red > printRedCut
+    if ( length(GoI) > 0 )
+      toPrint = toPrint | SNPs$inGene %in% GoI
     if ( printOnlyNovel ) toPrint = toPrint & freq1 < 0.1 & freq2 > 0.2
     if ( sum(toPrint) > 0 ) {
       printNames = gsub('.+:', '', SNPs[toPrint,]$inGene)
       printNames[is.na(printNames)] = 'i'
       if ( length(toPrint) > 0 )
-        text(freq1[toPrint], freq2[toPrint] + 0.015*pmax(0.6, cex[toPrint]), printNames, col = col[toPrint], cex = pmax(0.6, cex[toPrint]))
+        text(freq1[toPrint], freq2[toPrint] + 0.015*pmax(0.6, cex[toPrint]), printNames, col = col[toPrint], cex = pmax(0.6, cex[toPrint])*printCex)
       if ( verbose ) catLog('Highlighting', length(unique(printNames)), 'genes.\n')
       if ( outputHighlighted ) {
         out = data.frame('chr'=SNPs[toPrint,]$chr, 'pos'=SNPs[toPrint,]$start, 'x'=SNPs[toPrint,]$x, 'var'=q1$variant[toPrint], 'gene'=printNames,

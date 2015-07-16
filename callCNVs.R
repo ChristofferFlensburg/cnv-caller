@@ -7,7 +7,7 @@
 #It then calls the CN of each clustered region, as well as clonality, uncertainty estimate and p-value
 #for normal CN.
 #returns a list of data frames with each region of the genome on a row.
-callCNVs = function(variants, normalVariants, fitS, names, individuals, normals, Rdirectory, plotDirectory, genome='hg19', cpus=1, forceRedoCNV=F) {
+callCNVs = function(variants, normalVariants, fitS, SNPs, names, individuals, normals, Rdirectory, plotDirectory, genome='hg19', cpus=1, forceRedoCNV=F) {
   clustersSaveFile = paste0(Rdirectory, '/clusters.Rdata')
   if ( file.exists(clustersSaveFile) & !forceRedoCNV ) {
     catLog('Loading saved CNV results.\n')
@@ -15,8 +15,8 @@ callCNVs = function(variants, normalVariants, fitS, names, individuals, normals,
     return(clusters)
   }
 
-  #some capture regions can name regions very far apart the same name, which will be treated as a
-  #single region, messing up resolution. So remove any regions larger than 5Mbp.
+  #some capture regions can name regions very far apart the same name, such as '-', which will be treated as a
+  #single gene, messing up resolution. So remove any gene-regions larger than 5Mbp.
   #If this causes problems, rename the capture regions to avoid equal names at long distance.
   fitS = subsetFit(fitS, rows = abs(fitS$x2 - fitS$x1) < 5e6)
 
@@ -31,16 +31,18 @@ callCNVs = function(variants, normalVariants, fitS, names, individuals, normals,
                                   normalVariants=variants$variants[[correspondingNormal[name]]],
                                   moreNormalVariants=normalVariants$variants,
                                   fit = subsetFit(fitS, cols=paste0(name, '-normal')),
-                                  plotDirectory, name,
+                                  plotDirectory, name, individuals, SNPs,
                                   genome=genome, cpus=cpus))
     else
       return(callCancerNormalCNVs(cancerVariants=variants$variants[[name]],
                                   normalVariants=FALSE,
                                   moreNormalVariants=normalVariants$variants,
                                   fit = subsetFit(fitS, cols=paste0(name, '-normal')),
-                                  plotDirectory, name,
+                                  plotDirectory, name, individuals, SNPs,
                                   genome=genome, cpus=cpus))
   })
+
+  #cleanClusters = cancelLFCnoise(clusters, individuals)
 
   names(clusters) = names
   save(clusters, file=clustersSaveFile)
@@ -49,8 +51,7 @@ callCNVs = function(variants, normalVariants, fitS, names, individuals, normals,
 
 
 #the high level function that controls the steps of the CNV calling for given sample and normal variant objects.
-callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVariants, fit, plotDirectory, name, genome='hg19', cpus=1) {
-  require(parallel)
+callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVariants, fit, plotDirectory, name, individuals, SNPs, genome='hg19', cpus=1) {
   #estimate reference bias and variance from the selected normal hets.
   if ( class(normalVariants) == 'logical') {
     a=try(setVariantLoss(moreNormalVariants))
@@ -69,14 +70,14 @@ callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVarian
 
   #select good germline het variants from normals:
   if ( class(normalVariants) == 'logical') {
-    use = try(selectGermlineHetsFromCancer(cancerVariants, moreNormalVariants, fit$sex, cpus=cpus))
+    use = try(selectGermlineHetsFromCancer(cancerVariants, moreNormalVariants, fit$sex, SNPs, cpus=cpus))
     if ( class(use) == 'try-error' ) {
       catLog('Error in selectGermlineHetsFromCancer(cancerVariants, moreNormalVariants, cpus=cpus)\n')
       stop('Error in selectGermlineHetsFromCancer(cancerVariants, moreNormalVariants, cpus=cpus)!')
     }
   }
   else {
-    use = try(selectGermlineHets(normalVariants, moreNormalVariants, fit$sex, cpus=cpus))
+    use = try(selectGermlineHets(normalVariants, moreNormalVariants, fit$sex, SNPs, cpus=cpus))
     if ( class(use) == 'try-error' ) {
       catLog('Error in selectGermlineHets(normalVariants, moreNormalVariants, cpus=cpus)\n')
       stop('Error in selectGermlineHets(normalVariants, moreNormalVariants, cpus=cpus)!')
@@ -88,7 +89,8 @@ callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVarian
   #summarise by capture region
   catLog('Summarising capture regions..')
   mC = maxCov()
-  effectiveCov = round((cancerVariants$cov+2*cancerVariants$cov^2/(mC/2))/(1+cancerVariants$cov/(mC/2))^2)
+  d = cancerVariants$cov
+  effectiveCov = round(d*(1 + d/mC)/(1 + d/mC + d^2/mC^2))
   effectiveVar = round(cancerVariants$var/cancerVariants$cov*effectiveCov)
   effectiveFreqs = data.frame(var=mirrorDown(effectiveVar, cov=effectiveCov),
     cov=effectiveCov, x=cancerVariants$x)
@@ -100,7 +102,15 @@ callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVarian
   catLog('done!\n')
 
   #correct width if variance is underestimated
-  cancerCR = boostCRwidth(cancerCR)
+  diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
+  if ( !file.exists(diagnosticPlotsDirectory) ) dir.create(diagnosticPlotsDirectory)
+  boostDirectory = paste0(diagnosticPlotsDirectory, '/varianceBoost')
+  if ( !file.exists(boostDirectory) ) dir.create(boostDirectory)
+  boostFile = paste0(boostDirectory, '/', name, '.pdf')
+  catLog('Plotting boost to ', boostFile, '.\n')
+  pdf(boostFile, width=14, height=7)
+  cancerCR = boostCRwidth(cancerCR, plot=T)
+  dev.off()
 
   #run clustering algorithm
   cancerCluster = mergeChromosomes(cancerCR, effectiveFreqs, genome=genome, cpus=cpus)
@@ -108,10 +118,19 @@ callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVarian
   #run post processing, such as correcting normalisation from AB regions, calling CNVs and clonalities.
   catLog('Postprocessing...')
   post = postProcess(cancerCluster, cancerCR, effectiveFreqs, plotDirectory, name, genome, cpus=cpus)
+
   cancerCluster = post$clusters
   catLog('found total of', sum(cancerCluster$call != 'AB' & !grepl('\\?', cancerCluster$call)), 'CNVs..')
-  cancerCR$M = cancerCR$M - post$meanM
-  #plotCR(cancerCluster)
+  cancerCR$M = cancerCR$M + post$shift
+  
+  #plot diagnostics for the calls
+  diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
+  CNVcallDirectory = paste0(diagnosticPlotsDirectory, '/CNVcall')
+  if ( !file.exists(CNVcallDirectory) ) dir.create(CNVcallDirectory)
+  plotFile = paste0(CNVcallDirectory, '/', name, '.pdf')
+  pdf(plotFile, width=20, height=10)
+  plotMAFLFC(cancerCluster)
+  dev.off()
 
   #return clustered regions with calls, as well as the raw capture region data.
   catLog('done!\n')
@@ -122,7 +141,7 @@ callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVarian
 
 
 #helper function that selects germline het SNPs in the presence of a normal sample from the same individual.
-selectGermlineHets = function(normalVariants, moreNormalVariants, sex, minCoverage = 10, cpus=1) {
+selectGermlineHets = function(normalVariants, moreNormalVariants, sex, SNPs, minCoverage = 10, cpus=1) {
   #only bother with variants that have enough coverage so that we can actually see a change in frequency
   catLog('Taking variants with minimum coverage of', minCoverage, '...')
   decentCoverage = normalVariants$cov >= minCoverage
@@ -157,7 +176,7 @@ selectGermlineHets = function(normalVariants, moreNormalVariants, sex, minCovera
   
   #again to filter out noisy variants, filter on the RIB statistic in the cancer sample
   catLog('Taking variants that have low expected rate of incorrect basecalls in the normal sample..')
-  highNormalRIB = normalVariants$RIB > 0.03
+  highNormalRIB = normalVariants$RIB > 0.01
   use = use[!highNormalRIB]
   normalVariants = normalVariants[use,]
   catLog('done! Got', sum(!highNormalRIB), 'variants.\n')
@@ -169,19 +188,32 @@ selectGermlineHets = function(normalVariants, moreNormalVariants, sex, minCovera
   normalVariants = normalVariants[use,]
   catLog('done! Got', sum(highQ), 'variants.\n')
 
+  #Restrict to validated dbSNPs with population frequency > 1%
+  catLog('Restrict to validated dbSNPs with population frequency > 1%...')
+  SNPs = SNPs[SNPs$x %in% normalVariants$x,]
+  isValidated = SNPs[as.character(normalVariants$x),]$dbValidated
+  isFrequent = SNPs[as.character(normalVariants$x),]$dbMAF > 0.01
+  use = use[isValidated & isFrequent]
+  normalVariants = normalVariants[use,]
+  catLog('done! Got', sum(isValidated & isFrequent), 'variants.\n')
+
   #remove variants from male X and Y, and female Y-chromsomes
-  catLog('Removing variants in male X and Y, and female Y...')
+  if ( sex == 'male' )
+    catLog('Removing variants in male X and Y...')
+  else
+    catLog('Removing variants in female Y...')
   notHet = xToChr(normalVariants$x) %in% ifelse(sex=='male', c('X','Y'), 'Y')
   use = rownames(normalVariants)[!notHet]
   normalVariants = normalVariants[use,]
-  catLog('done! Discarded', sum(notHet), 'variants. This is an indication of the number of false SNPs in other chromsomes.\n')
+  extrapolatedFalse = round(sum(chrLengths(genome))/sum(chrLengths(genome)[ifelse(sex=='male', c('X','Y'), 'Y')])*sum(notHet))
+  catLog('done! Discarded', sum(notHet), 'variants. This naively extrapolates to', extrapolatedFalse, 'false SNPs genomewide.\n')
   if ( length(use) == 0 ) return(use)
 
   return(use)
 }
 
 #helper function that selects germline het SNPs in the absence of a normal sample from the same individual.
-selectGermlineHetsFromCancer = function(cancerVariants, moreNormalVariants, sex, minCoverage = 10, cpus=1) {
+selectGermlineHetsFromCancer = function(cancerVariants, moreNormalVariants, sex, SNPs, minCoverage = 10, cpus=1) {
   #only bother with variants that have enough coverage so that we can actually see a change in frequency
   catLog('Taking variants with minimum coverage of', minCoverage, '...')
   decentCoverage = cancerVariants$cov >= minCoverage
@@ -222,7 +254,7 @@ selectGermlineHetsFromCancer = function(cancerVariants, moreNormalVariants, sex,
   
   #again to filter out noisy variants, filter on the RIB statistic in the cancer sample
   catLog('Taking variants that have low expected rate of incorrect basecalls in the sample..')
-  highCancerRIB = cancerVariants$RIB > 0.03
+  highCancerRIB = cancerVariants$RIB > 0.01
   use = use[!highCancerRIB]
   cancerVariants = cancerVariants[use,]
   catLog('done! Got', sum(!highCancerRIB), 'variants.\n')
@@ -234,12 +266,24 @@ selectGermlineHetsFromCancer = function(cancerVariants, moreNormalVariants, sex,
   cancerVariants = cancerVariants[use,]
   catLog('done! Got', sum(highQ), 'variants.\n')
 
+  #Restrict to validated dbSNPs with population frequency > 1%
+  catLog('Restrict to validated dbSNPs with population frequency > 1%...')
+  isValidated = cancerVariants$dbValidated
+  isFrequent = cancerVariants$dbMAF > 0.01
+  use = use[isValidated & isFrequent]
+  cancerVariants = cancerVariants[use,]
+  catLog('done! Got', sum(isValidated & isFrequent), 'variants.\n')
+
   #remove variants from male X and Y, and female Y-chromsomes
-  catLog('Removing variants in male X and Y, and female Y...')
+  if ( sex == 'male' )
+    catLog('Removing variants in male X and Y...')
+  else
+    catLog('Removing variants in female Y...')
   notHet = xToChr(cancerVariants$x) %in% ifelse(sex=='male', c('X','Y'), 'Y')
   use = rownames(cancerVariants)[!notHet]
   cancerVariants = cancerVariants[use,]
-  catLog('done! Discarded', sum(notHet), 'variants. This is an indication of the number of false SNPs in other chromsomes.\n')
+  extrapolatedFalse = round(sum(chrLengths(genome))/sum(chrLengths(genome)[ifelse(sex=='male', c('X','Y'), 'Y')])*sum(notHet))
+  catLog('done! Discarded', sum(notHet), 'variants. This naively extrapolates to', extrapolatedFalse, 'false SNPs genomewide.\n')
   if ( length(use) == 0 ) return(use)
 
   return(use)
@@ -269,6 +313,8 @@ unifyCaptureRegions = function(eFreqs, fit, cpus=1) {
     return(fisherTest(odsHet)[2])
   }))
 
+  #relWidth = sqrt(fit$df.total[1]/(fit$df.total[1]-2))
+
   cR = data.frame(x1=fit$x1, x2=fit$x2, M=fit$coefficients[,1], width=fit$coefficients[,1]/fit$t[,1], df=fit$df.total,
     uniFreq[,1:2], pHet=pHet, pAlt=pAlt, odsHet=odsHet)
   return(cR)
@@ -293,13 +339,15 @@ alternativeFrequency = function(efs, plot=F) {
 #merges regions in each chromosome.
 mergeChromosomes = function(cR, eFreqs, genome='hg19', cpus=1, ...) {
   chrs = xToChr(cR$x1, genome=genome)
+  breakpoints = pmax(nrow(cR) - length(unique(chrs)), 1)
+  MHTcut = 0.05/breakpoints
   
   catLog('Merging capture regions with same coverage and MAF: ')
   clusters = mclapply(unique(chrs), function(chr) {
     catLog(chr, '..', sep='')
-    ret = mergeRegions(cR[chrs == chr,], ...)
+    ret = mergeRegions(cR[chrs == chr,], minScore=MHTcut, ...)
     singleSNP = calledFromSingleSNP(ret, eFreqs)
-    if ( any(singleSNP) ) ret = mergeRegions(ret, forceMerge=singleSNP, ...)
+    if ( any(singleSNP) ) ret = mergeRegions(ret, force=singleSNP, minScore=MHTcut, ...)
     ret$altStatErr = ret$nullStatErr = ret$altStat = ret$nullStat = ret$stat = ret$f = rep(NA, nrow(ret))
     ret$postHet = rep(1, nrow(ret))
     if ( any(ret$cov > 0) ) {
@@ -314,13 +362,13 @@ mergeChromosomes = function(cR, eFreqs, genome='hg19', cpus=1, ...) {
   catLog('done!\n')
   return(clusters)
 }
-mergeRegions = function(cR, minScore = 0.05, plot=F, debug=F, forceMerge=NA) {
+mergeRegions = function(cR, minScore = 0.05, plot=F, debug=F, force=NA) {
   merged = c()
   scores = c()
   if ( debug ) Nloop = 0
   cR = cR[order(cR$x1+cR$x2),]
   pairScore = sameCNV(cR)
-  if ( !is.na(forceMerge[1]) & length(forceMerge) == length(pairScore) ) pairScore[forceMerge] = 1
+  if ( !is.na(force[1]) & length(force) == length(pairScore) ) pairScore[force] = 1
   while(dim(cR)[1] > 1) {
     #find the pair of regions with the largest pairing probability
     best = which(pairScore == max(pairScore))[1]
@@ -354,7 +402,7 @@ mergeRegions = function(cR, minScore = 0.05, plot=F, debug=F, forceMerge=NA) {
     cR$cov[best] = cR$cov[best] + cR$cov[best+1]
     cR$M[best] = (cR$M[best]/cR$width[best]^2 + cR$M[best+1]/cR$width[best+1]^2)/(1/cR$width[best]^2+1/cR$width[best+1]^2)
     cR$width[best] = 1/sqrt(1/cR$width[best]^2 + 1/cR$width[best+1]^2)
-    cR$pHet[best] = if ( cR$cov[best] + cR$cov[best+1] > 0 ) stoufferTest(c(cR$pHet[best], cR$pHet[best+1]), c(cR$cov[best], cR$cov[best+1]))[2] else 0.5
+    cR$pHet[best] = if ( cR$cov[best] > 0 ) stoufferTest(c(cR$pHet[best], cR$pHet[best+1]), c(cR$cov[best], cR$cov[best+1]))[2] else 0.5
     cR = cR[-(best+1),]
     pairScore = pairScore[-best]
     if ( best > 1 ) pairScore[best-1] = sameCNV(cR[(best-1):best,])
@@ -374,7 +422,8 @@ calledFromSingleSNP = function(cR, eFreqs) {
   
   x = eFreqs$x
   snps = lapply(first, function(row) which(x < cR$x2[row] & x > cR$x1[row]))
-  singleSNP = sapply(snps, length) == 1 | sapply(snps, function(is) max(eFreqs$x[is]) - min(eFreqs$x[is]) < fragmentLength())
+  singleSNP = sapply(snps, length) == 1 | sapply(snps, function(is)
+                      max(c(-Inf, eFreqs$x[is])) - min(c(Inf, eFreqs$x[is])) < fragmentLength())
 
   width = cR$width + 0*systematicVariance()
   meanM = (cR$M[first]/width[first]^2 + cR$M[second]/width[second]^2)/(1/width[first]^2 + 1/width[second]^2)
@@ -399,16 +448,14 @@ postProcess = function(clusters, cRs, eFreqs, plotDirectory, name, genome='hg19'
   diagnosticMAFDirectory = paste0(diagnosticPlotsDirectory, '/MAFstat/')
   if ( !file.exists(diagnosticMAFDirectory) ) dir.create(diagnosticMAFDirectory)
   plotFile = paste0(diagnosticMAFDirectory, name, '.pdf')
-  catLog('plotting MAF stats to', plotFile, '..')
   pdf(plotFile, width=15, height=7)
   clusters = redoHetCalculations(clusters, eFreqs, cpus=cpus, plot=T)
   dev.off()
+  catLog('renormalising..')
+  renorm =  findShift(clusters, plot=F)
+  shift = renorm$M[1] - clusters$M[1]
+  clusters = renorm
   catLog('call CNVs..')
-  clusters = addCall(clusters, eFreqs)
-  catLog('renormalise from AB calls..')
-  renorm =  normaliseCoverageToHets(clusters)
-  clusters = renorm$clusters
-  catLog('redo CNV calls..')
   clusters = addCall(clusters, eFreqs)
   clusters = fixFalseSNPcall(clusters, eFreqs)
   sCAN = sameCallAsNeighbour(clusters)
@@ -416,14 +463,14 @@ postProcess = function(clusters, cRs, eFreqs, plotDirectory, name, genome='hg19'
     catLog('found', sum(sCAN),'neighbouring regions with same call: merge and redo postprocessing!\n')
     clusters = forceMerge(clusters, sCAN)
     ret = postProcess(clusters, cRs, eFreqs, plotDirectory, name, genome=genome, cpus=cpus)
-    ret$meanM = ret$meanM + renorm$meanM
+    ret$shift = ret$shift + shift
     return(ret)
   }
   catLog('find subclones..')
   clusters = findSubclones(clusters)
   rownames(clusters) = make.names(paste0('chr', xToChr(clusters$x1, genome=genome)), unique=T)
   clusters = clusters[order(clusters$x1),]
-  return(list(clusters=clusters, meanM=renorm$meanM))
+  return(list(clusters=clusters, shift=shift))
 }
 
 fixFalseSNPcall = function(clusters, eFreqs) {
@@ -433,7 +480,7 @@ fixFalseSNPcall = function(clusters, eFreqs) {
   snps = lapply(1:nrow(clusters), function(row) which(x < clusters$x2[row] & x > clusters$x1[row]))
   basedOnFewSNPs = sapply(snps, length) < 5
   basedOnSmallRegion = sapply(snps, function(is) length(is) > 0 && max(eFreqs$x[is]) - min(eFreqs$x[is]) < 1e5)
-  inconsistentEvidence = clusters$sigma > 3
+  inconsistentEvidence = clusters$sigma > 2
   falseCall = isAA & smallRegion & (basedOnFewSNPs | basedOnSmallRegion | inconsistentEvidence)
   if ( any(falseCall) ) {
     catLog('found', sum(falseCall), 'AA calls from false SNPs..')
@@ -450,6 +497,7 @@ fixFalseSNPcall = function(clusters, eFreqs) {
 }
 
 sameCallAsNeighbour = function(clusters) {
+  if ( nrow(clusters) == 1 ) return(F)
   chr = xToChr(clusters$x1)
   first = 1:(nrow(clusters)-1)
   second = 2:nrow(clusters)
@@ -466,7 +514,7 @@ forceMerge = function(clusters, toMerge) {
   newClusters = list()
   for ( chr in redoChrs ) {
     is = which(chrs == chr)
-    newClusters[[chr]] = mergeRegions(clusters[is,], forceMerge=toMerge[is][-length(is)])
+    newClusters[[chr]] = mergeRegions(clusters[is,], force=toMerge[is][-length(is)])
   }
   clusters = clusters[!(chrs %in% redoChrs),]
   for ( chr in redoChrs ) {
@@ -496,7 +544,7 @@ redoHetCalculations = function(clusters, eFreqs, plot=F, cpus=1) {
   Zfreq = mclapply(snps[clusters$cov > 0], function(is) {
     efs = eFreqs[is,]
 
-    fAlt = refBias(alternativeFrequency(efs)['f'])
+    fAlt = max(0.001, refBias(alternativeFrequency(efs)['f']))
     
     #z score for each SNP
     z = sapply(1:length(efs$cov), function(i)
@@ -508,6 +556,7 @@ redoHetCalculations = function(clusters, eFreqs, plot=F, cpus=1) {
     errorRetNull = sqrt(sum(z[7,]-z[3,]^2))/sum(z[5,])
     meanRetAlt = sum(z[4,])/sum(z[6,])
     errorRetAlt = sqrt(sum(z[8,]) - sum(z[4,]^2))/sum(z[6,])
+    if ( sum(z[1,]) == 0 ) return(rep(0,5)) 
     return(c(ret, meanRetNull, meanRetAlt, errorRetNull, errorRetAlt))
   }, mc.cores=cpus)
   Zfreq = do.call(cbind, Zfreq)
@@ -536,10 +585,11 @@ redoHetCalculations = function(clusters, eFreqs, plot=F, cpus=1) {
            lwd = c(1,1,0.001), pt.lwd=c(1,1,2), pt.cex=c(1,1,1.5), pch=c(16,16,4), bg='white')
   }
   
-  pHet = pnorm(Z[1,], Z[2,], Z[4,])
-  pHet[is.nan(pHet)] = 0.5
   pAlt = pnorm(-Z[1,], -Z[3,], Z[5,])
   pAlt[is.nan(pAlt)] = 0.5
+  pHet = pnorm(Z[1,], Z[2,], Z[4,])
+  pHet[is.nan(pHet)] = 0.5
+  pHet[pAlt == 0 & pHet == 0] = 1e-10
   
   clusters$pHet = pHet
   clusters$pAlt = pAlt
@@ -633,12 +683,8 @@ normaliseCoverageToHets = function(clusters) {
 addCall = function(clusters, eFreqs) {
   catLog('Calling CNVs in clustered regions..')
   for ( row in 1:nrow(clusters) ) {
-    clusters$call[row] = '???'
-    clusters$clonality[row] = 0
-    clusters$clonalityError[row] = Inf
-    clusters$sigma[row] = 3
     efs = eFreqs[eFreqs$x > clusters$x1[row] & eFreqs$x < clusters$x2[row],]
-    isab = isAB(clusters[row,], efs, sigmaCut=clusters$sigma[row])
+    isab = isAB(clusters[row,], efs, sigmaCut=2)
     clusters$call[row] = 'AB'
     clusters$clonality[row] = 1
     clusters$clonalityError[row] = 0
@@ -647,8 +693,8 @@ addCall = function(clusters, eFreqs) {
     if ( !(isab$call) ) {
       for ( tryCall in allCalls() ) {
         iscnv = isCNV(clusters[row,], efs, callTofM(tryCall)['M'], callTofM(tryCall)['f'], callPrior(tryCall),
-          sigmaCut=max(3, clusters$sigma[row]))
-        if ( (iscnv$call & clusters$sigma[row] > 3) |
+          sigmaCut=max(2, clusters$sigma[row]))
+        if ( (iscnv$call & clusters$sigma[row] > 2) |
             (iscnv$call & (iscnv$clonality > clusters$clonality[row] | (iscnv$clonality == clusters$clonality[row] & iscnv$sigma < clusters$sigma[row]))) ) {
           clusters$clonality[row] = iscnv$clonality
           clusters$clonalityError[row] = iscnv$clonalityError
@@ -668,8 +714,8 @@ addCall = function(clusters, eFreqs) {
 }
 
 #probability that a region is AB.
-isAB = function(cluster, eFreqs, sigmaCut=3) {
-  if ( sum(eFreqs$cov) == 0 ) pF = 0.5
+isAB = function(cluster, efs, sigmaCut=3) {
+  if ( sum(efs$cov) == 0 ) pF = 0.5
   else if ( cluster$stat >= 0 ) pF = 1
   else {
     pF = cluster$postHet
@@ -688,7 +734,7 @@ allCalls = function() {
 #returns the prior of a call. Prior is proprotional to 1 divided by the number of removed or added chromosomes.
 #no CNV is given a prior 5 times as high as A and AAB.
 callPrior = function(call) {
-  priors = c('AB'=5, 'A'=1, 'AA'=1/2, 'AAA'=1/3, 'AAAA'=1/4, 'AAB'=1, 'AAAB'=1/2, 'AAAAB'=1/3, 'AAAAAB'=1/4, 'AAAAAAB'=1/5,
+  priors = c('AB'=10, 'A'=1, 'AA'=1/2, 'AAA'=1/3, 'AAAA'=1/4, 'AAB'=1, 'AAAB'=1/2, 'AAAAB'=1/3, 'AAAAAB'=1/4, 'AAAAAAB'=1/5,
     'AABB'=1/2, 'CL'=1/2)
   priors = priors/sum(priors)
   if ( call %in% names(priors) ) return(priors[call])
@@ -701,83 +747,86 @@ callTofM = function(call) {
   nB = nchar(call) - nchar(gsub('B', '', call))
   f = min(nA, nB)/(nA+nB)
   if ( call %in%  c('CL', '') ) f = 0.5  #if complete loss, assume not completely clonal and a normal AB background.
-  return(c(f=f, M=(nA+nB)/2))
+  return(c(f=f, M=log2((nA+nB)/2)))
 }
 
 #estimates how likely a certain call is for a given region.
 isCNV = function(cluster, efs, M, f, prior, sigmaCut=3) {
   #set an estimate of the error on the measured MAF in the cluster
-  ferr = if ( is.nan(cluster$f) ) Inf else cluster$ferr
+  ferr = if ( cluster$cov == 0 ) Inf else cluster$ferr
 
-  #set weights for coverage and frequency in determining clonality.
-  linearMWidth = abs(2^(cluster$M+cluster$width) - 2^(cluster$M-cluster$width))/2 + 2^cluster$M*systematicVariance()
-  if ( is.na(cluster$f) ) cf = 0 else cf = cluster$f
+  #add the systematic variance to the setting, to not overestimate confidence in coverage
+  mWidth = sqrt(cluster$width^2 + systematicVariance()^2)
+
+  #The MAF of the cluster
+  if ( cluster$cov == 0 ) cf = 0 else cf = pmax(0.001, cluster$f)
 
   #If no basis to determine clonality, the no point in continuing
-  if ( (f == 0.5 | is.na(cluster$f)) & M == 1 )
+  if ( (f == 0.5 | cluster$cov == 0) & M == 0 )
     return(list(call=F, clonality=0, sigma = Inf, clonalityError=Inf, pCall=1))
 
-  #estimate clonality as a weighted mean from the coverage and frequency
-  freqClonality = (0.5-cf)/(0.5-cf+M*(cf-f))
-  clonalityErrorF = ferr*(freqClonality*(M-1)+1)/(0.5-cf+M*(cf-f))
-  if ( f == 0.5 | is.na(cluster$f) ) {
+  #estimate clonality from frequency and propagate uncertainty
+  freqClonality = (0.5-cf)/(0.5-cf+2^M*(cf-f))
+  clonalityErrorF = ferr*(freqClonality*(2^M-1)+1)/(0.5-cf+2^M*(cf-f))
+  if ( f == 0.5 | cluster$cov == 0 ) {
     freqClonality = 1
     clonalityErrorF = Inf
   }
-  if ( f == 0.5 | is.na(cluster$f) ) fweight = 0
+  #set the weight associated with the MAF
+  if ( f == 0.5 | cluster$cov == 0 ) fweight = 0
   else fweight = 1/clonalityErrorF^2
-  covClonality = (2^cluster$M - 1)/(M - 1)
-  clonalityErrorM = linearMWidth/abs(M-1)
-  if ( M == 1 ) {
+
+  #estimate clonality from coverage and propagate uncertainty
+  covClonality = (2^cluster$M - 1)/(2^M - 1)
+  clonalityErrorM = 2^cluster$M*log(2)*mWidth/abs(2^M-1)
+  if ( M == 0 ) {
     covClonality = 1
     clonalityErrorM = Inf
   }
   if ( !is.na(clonalityErrorM) ) Mweight = 1/clonalityErrorM^2
   else Mweight = 0
-  clonality = (freqClonality*fweight + covClonality*Mweight)/(fweight+Mweight)
-  clonality = min(1.05, clonality)
 
-  #propagate errors on f and M to the clonality. Give bonus uncertainty if f and M disagree.
+  #common estimate of cloanlity based on MAF and coverage, propagate uncertainty
+  clonality = (freqClonality*fweight + covClonality*Mweight)/(fweight+Mweight)
+  clonality = max(0, min(1, clonality))
+  clonalityError = 1/sqrt(1/clonalityErrorF^2 + 1/clonalityErrorM^2)
+
+  #if the MAF and coverage estimates are not within errors, increase the uncertainty
+  #to cover both estimates.
   clonalityDifference =
     if ( fweight > 0 & Mweight > 0 ) noneg(abs(freqClonality-covClonality) - sqrt(clonalityErrorF^2 + clonalityErrorM^2))
     else 0
   if ( fweight == 0 ) {     #if information from only one source, add some extra uncertainty to the clonality
     clonalityErrorF = 0.3
-    fweight = sqrt(Mweight)
+    fweight = Mweight/10
   }
   if ( Mweight == 0 ) {
     clonalityErrorM = 0.3
-    Mweight = sqrt(fweight)
+    Mweight = fweight/10
   }
-  clonalityError =
-    sqrt(fweight^2*clonalityErrorF^2 + Mweight^2*clonalityErrorM^2 + fweight*Mweight*clonalityDifference^2)/(fweight + Mweight)
-  #if negative clonality, add uncertainty to the clonality and force back to 0.
-  if ( clonality < 0 ) {
-    clonalityError = sqrt(clonalityError^2 + abs(clonality)^2)
-    clonality = 0
-  }
+  clonalityError = sqrt(clonalityError^2 + clonalityDifference^2)
   
-  #update f and M for the estimated clonality
-  fClone = (clonality*(2*f*M-1) + 1)/(clonality*(2*M - 2) + 2)
-  MClone = log2(1 + (M-1)*clonality)
-  #calculate sigma for these f and M
-  if ( cluster$cov == 0 ) pF = pCall = exp(-1)
-  else {
-    pCall = pF = fisherTest(pBinom(efs$cov, efs$var, refBias(fClone)))['pVal']
-    pF = (pF+1e-10)
-  }
+  #the expected MAF and LFC for the estimated clonality
+  fClone = (clonality*(2*f*2^M-1) + 1)/(clonality*(2*2^M - 2) + 2)
+  MClone = log2(1 + (2^M-1)*clonality)
+  #calculate likelihood for these f and M
+  if ( cluster$cov == 0 ) pCall = exp(-1)
+  else pCall = fisherTest(pBinom(efs$cov, efs$var, refBias(fClone)))['pVal']
   pM = 2*pt(-noneg(abs(cluster$M - MClone))/(cluster$width+systematicVariance()), df=cluster$df)  #allow systematic error
-  pBoth = fisherTest(c(pF, pM))[2]
+
+  #likelihood for both MAF and LFC fitting the called clonality
+  pBoth = fisherTest(c(pCall + 1e-10, pM))[2]
   if ( cluster$cov == 0 ) pBoth = pM
   
-  #add prior
+  #add prior for this call to get posterior
   pBoth = prior*pBoth/(prior*pBoth + (1-prior)*(1-pBoth))
+  #convert posterior to a sigma statistic
   sigma = abs(qnorm(pBoth/2, 0, 1))
 
-  call = sigma < sigmaCut & clonality > 0.1
+  #decide whether the data fit well enough to make a call
+  call = sigma < sigmaCut & clonality > 3*clonalityError
   if ( is.na(call) ) call = F
-  return(list(call=as.logical(call), clonality=pmin(1,as.numeric(clonality)),
-              sigma = sigma, clonalityError=as.numeric(clonalityError), pCall=pCall))
+  return(list(call=call, clonality=clonality, sigma = sigma, clonalityError=clonalityError, pCall=pCall))
 }
 
 #groups up CNV regions with similar clonalities to estimate the subclonal structure of the sample
@@ -833,16 +882,22 @@ subsetFit = function(fit, rows=NA, cols=NA) {
   return(fit)
 }
 
-systematicVariance = function() {return(get('.systematicVariance', envir = .GlobalEnv))}
+systematicVariance = function() {
+  if ( !exists('.systematicVariance') ) {
+    assign('.systematicVariance', 0, envir = .GlobalEnv)
+    warning('.systematicVariance not previouly defined. Setting to 0.\n')
+  }
+  return(get('.systematicVariance', envir = .GlobalEnv))
+}
 
 #the posterior probability that two capture regions belong the same CNVinterval
 sameCNV = function(cR) {
-  if ( dim(cR)[1] < 2 ) return(1)
+  if ( nrow(cR)[1] < 2 ) return(1)
 
   #find the prior from the gap lengths
   first = 1:(nrow(cR)-1)
   second = 2:nrow(cR)
-  dx = abs((cR$x1+cR$x2)[second]/2 - (cR$x1+cR$x2)[first]/2)
+  dx = noneg(cR$x1[second] - cR$x2[first]) + 10000
   prior = exp(-dx*CNVregionsPerBP())
 
   #find the probabilities of getting measure values if the SNP frequencies are equal
@@ -857,7 +912,6 @@ sameCNV = function(cR) {
   #can cause different mean MAF. We catch that case by grouping regions that are consistent with 50%, independently of MAF.
   if ( 'postHet' %in% names(cR) ) pBoth50 = sapply(first, function(i) min(p.adjust(c(cR$postHet[i], cR$postHet[i+1]), method='fdr')))
   else pBoth50 = sapply(first, function(i) min(p.adjust(c(cR$pHet[i], cR$pHet[i+1]), method='fdr')))
-  postBoth50 = prior*pBoth50/(prior*pBoth50 + (1-prior))
   pF = pmax(simesFP, pBoth50)
   noFreq = cR$cov[first] == 0 | cR$cov[second] == 0
 
@@ -882,15 +936,16 @@ CNVregionsPerBP = function() {return(1/1e8)}
 
 #helper function doing the stouffer Test
 stoufferTest = function(p, w) {
+  p = pmin(0.99999, pmax(1e-20, p))
   if (missing(w)) {
-    w <- rep(1, length(p))/length(p)
+    w = rep(1, length(p))/length(p)
   } else {
     if (length(w) != length(p))
       stop("Length of p and w must equal!")
   }
-  Zi <- qnorm(1-p) 
-  Z  <- sum(w*Zi)/sqrt(sum(w^2))
-  p.val <- 1-pnorm(Z)
+  Zi = ifelse(p > 0.5, qnorm(1-p), -qnorm(p)) 
+  Z  = sum(w*Zi)/sqrt(sum(w^2))
+  p.val = 1-pnorm(Z)
   return(c(Z = Z, p.value = p.val))
 }
 
@@ -910,7 +965,7 @@ sameClone = function(clonality, error, prior = 0.99) {
 
 #helper function that use neighbours to study the variance estimate
 #will add a constant to width to correct for underrestimated variance
-boostCRwidth = function(CR) {
+boostCRwidth = function(CR, plot=F) {
   CR = CR[order(CR$x1),]
   x = (CR$x1+CR$x2)/2
   
@@ -918,13 +973,88 @@ boostCRwidth = function(CR) {
   y1 = rt(100000, CR$df[1])
   y2 = rt(100000, CR$df[1])
   the = median(abs(y1-y2))
-  breaks = (0:500)/5
 
   last = nrow(CR)
   changeBoost = function(boost) median(abs((CR$M[-1]-CR$M[-last])/sqrt((CR$width[-1]+boost)^2+(CR$width[-last]+boost)^2)))
-  changes = sapply((0:50)/1000, changeBoost)
-  widthBoost = ((0:50)/1000)[max(c(1, which(changes > the)))]
-  CR$width = CR$width + widthBoost
+  testRange = (0:200)/1000
+  changes = sapply(testRange, changeBoost)
+  widthBoost = testRange[max(c(1, which(changes > the)))]
+
+  if ( widthBoost > 0 ) catLog('Boosted biological variance of LFC by ', widthBoost, '.\n')
+  else catLog('No boost needed for biological variance.\n')
+
+  if ( plot ) {
+    maxDev = max(abs(y1-y2), abs((CR$M[-1]-CR$M[-last])/sqrt((CR$width[-1])^2+(CR$width[-last])^2)),
+      abs((CR$M[-1]-CR$M[-last])/sqrt((CR$width[-1]+widthBoost)^2+(CR$width[-last]+widthBoost)^2)))
+    breaks = (0:500)/500*maxDev
+    xmax = quantile(abs((CR$M[-1]-CR$M[-last])/sqrt((CR$width[-1])^2+(CR$width[-last])^2)), probs=0.99)
+    h0 = hist(abs(y1-y2), plot=T, breaks=breaks, col='grey', xlab='difference/sqrt(width1^2 + width2^2)',
+      ylab='#regions', main='LFC difference of neighbouring regions', freq=F, xlim=c(0, xmax))
+    h1 = hist(abs((CR$M[-1]-CR$M[-last])/sqrt((CR$width[-1])^2+(CR$width[-last])^2)), plot=F, breaks=breaks)
+    h2 = hist(abs((CR$M[-1]-CR$M[-last])/sqrt((CR$width[-1]+widthBoost)^2+(CR$width[-last]+widthBoost)^2)), plot=F, breaks=breaks)
+    lines(h1$mids, h1$density, col=mcri('blue'), lwd=5)
+    lines(h2$mids, h2$density, col=mcri('red'), lwd=3)
+    legend('topright', c('expected', 'no boost', 'boosted variance'), lwd=c(10, 5, 3),
+           col=mcri(c('grey', 'blue', 'red')))
+
+    ymax = max(changes, the)
+    plot(testRange, changes, type='l', lwd=3, col=mcri('blue'), xlab='width boost', ylab='median difference',
+         main='boost optimisation curve', ylim=c(0, ymax))
+    segments(widthBoost, 0, widthBoost, 2*xmax, lwd=3, col=mcri('red'))
+    segments(-1, the, 1, the, lwd=3, col=mcri('grey'))
+    legend('topright', c('median difference', 'expected median', 'selected boost'), lwd=c(3,3,3),
+           col=mcri(c('blue', 'grey', 'red')), bg='white')
+  }
   
+  CR$width = CR$width + widthBoost
   return(CR)
 }
+
+
+#plotting function for diagnostic plot of calls. Good for spotting failed average CNV.
+plotMAFLFC = function(clusters, xlim=c(-1.2, 1.2)) {
+  plot(0, type='n', xlim=xlim, ylim=c(0, 0.5), xlab='LFC', ylab='MAF')
+  clonalities = (0:500)/500
+  for ( call in allCalls()[c(1:8, 11:12)] ) {
+    fMs = callCloneTofM(call, clonalities)
+    points(fMs[,2], fMs[,1], pch=16, cex=2*clonalities, col=callToCol(call))
+    text(fMs[round(length(clonalities)*0.6),2]+0.05, fMs[round(length(clonalities)*0.6),1]+0.01, call, col=callsToCol(call))
+  }
+  w = sqrt(clusters$width^2 + systematicVariance()^2)
+  f = clusters$f
+  ferr = ifelse(clusters$cov == 0, 0.25, clusters$ferr)
+  f = ifelse(clusters$cov == 0, 0.25, f)
+  points(clusters$M, f, pch=16, cex = pmin(1.5,pmax(0.2, sqrt((0.1/(w/2))^2 + (0.1/(ferr/0.5))^2))), col=callsToCol(clusters$call))
+  segments(clusters$M+w, f, clusters$M-w, f,
+           lwd = pmin(1.5,pmax(0.2, 0.1/(w/2))), col=callsToCol(clusters$call))
+  segments(clusters$M, f+ferr, clusters$M, f-ferr,
+           lwd = pmin(1.5,pmax(0.2, 0.1/(ferr/0.5))), col=callsToCol(clusters$call))
+  legend('topright', c('clonality=0.25', 'clonality=0.50', 'clonality=0.75', 'clonality=1'), pch=16, pt.cex=c(0.5, 1, 1.5, 2))
+  
+}
+#helper function
+callCloneTofM = function(call, clonality) {
+  fM = callTofM(call)
+  M = log2(2^fM['M']*clonality + 1 - clonality)
+  f = (fM['f']*2^fM['M']*clonality + (1-clonality)/2)/(2^fM['M']*clonality + 1 - clonality)
+  return(cbind(f, M))
+}
+#helper function
+callsToCol = function(calls) {
+  return(sapply(calls, callToCol))
+}
+callToCol = function(call) {
+  if ( call == 'AB' ) return(mcri('black'))
+  if ( call == 'A' ) return(mcri('red'))
+  if ( call == 'AAB' ) return(mcri('cyan'))
+  if ( call == 'AAAB' ) return(mcri('orange'))
+  if ( call == 'AAAAB' ) return(mcri('green'))
+  if ( call == 'AAAAAB' ) return(mcri('black'))
+  if ( call == 'AAAAAAB' ) return(mcri('black'))
+  if ( call == 'AA' ) return(mcri('green'))
+  if ( call == 'CL' ) return(mcri('orange'))
+  if ( call == 'AABB' ) return(mcri('purple'))
+  if ( call == 'AAA' ) return(mcri('grey'))
+  return('black')
+}
+
