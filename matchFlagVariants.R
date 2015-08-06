@@ -136,7 +136,7 @@ flagFromNormals = function(variants, normalVariants, cpus=1) {
   present = fs > 0.2 & covN >= 10
   variableNormal = (!normalNoise & rowsums(present) > 0 & !db) | (!normalNoise & non0 & !consistent & db)
   catLog('Flagged another', sum(variableNormal), 'out of', nrow(fs),
-         'variants that are not db, but significantly present in at least on normal sample.\n')
+         'variants that are not db, but significantly present in at least one normal sample.\n')
 
   meanCov = rowmeans(covN)
   medianCov = median(meanCov[unflagged & meanCov >= 5])
@@ -246,12 +246,12 @@ markSomatics = function(variants, normalVariants, individuals, normals, cpus=cpu
     pPolymorphic = 1/(1+nrow(q)/(polymorphicFrequency*basePairs))
     pNormalFreq = pBinom(q$cov, q$var, normalFreq)
     normalOK = pmin(1, noneg((0.05-normalFreq)/0.05))^2*(normalFreq < freq)
-    catLog('No matched normal: removing all dbSNPs from the somatic candidates.\n', sep='')
+    if ( !(name %in% names(CNs)) ) catLog('No matched normal: removing all dbSNPs from the somatic candidates.\n', sep='')
     notInNormal = as.numeric(!q$db)
     if ( name %in% names(CNs) ) {
       catLog('Correcting somatics using matched normal.\n')
       qn = variants$variants[[correspondingNormal[name]]][use,]
-      referenceNormal = (qn$var <= 0.2*qn$cov)
+      referenceNormal = (qn$var <= 0.1*qn$cov)
       pNormalHet = pBinom(qn$cov[referenceNormal], qn$var[referenceNormal], 0.3)
       fdrNormalHet = p.adjust(pNormalHet, method='fdr')
       referenceNormal[referenceNormal] = fdrNormalHet < 0.01
@@ -259,16 +259,13 @@ markSomatics = function(variants, normalVariants, individuals, normals, cpus=cpu
       psameF = unlist(mclapply(which(referenceNormal), function(i)
         fisher.test(matrix(c(q$ref[i], q$var[i], qn$ref[i], qn$var[i]), nrow=2))$p.value,
         mc.cores=cpus))
-      candidates = q$var > 1 & qn$var < qn$cov*0.15
-      fdrSameF = rep(1, length(psameF))
-      fdrSameF[candidates] = p.adjust(psameF[candidates], method='fdr')
-      referenceNormal[referenceNormal] = fdrSameF < 0.05
-      notInNormal = referenceNormal      
+      referenceNormal[referenceNormal] = psameF < 0.05 & (q$var/q$cov > 0.2 + 2*(qn$var/qn$cov))[referenceNormal]
+      notInNormal = referenceNormal
       normalOK = ifelse(qn$cov == 0, 0.5, noneg(1 - 5*qn$var/qn$cov)) #penalty for non-zero normal frequency
     }
     pSampleOK = p.adjust(q$pbq, method='fdr')*p.adjust(q$pmq, method='fdr')*p.adjust(q$psr, method='fdr')
     pZero = p.adjust(dbinom(q$var, q$cov, 0.01), method='fdr')   #the base quality cut on 30 correpsonds to 0.001 wrong base calls.
-    lowFrequencyPenalty = ifelse(q$cov > 0, pmin(1, 4*q$var/q$cov), 0) #penalty below 25% frequency
+    lowFrequencyPenalty = ifelse(q$cov > 0, pmin(1, 5*q$var/q$cov), 0) #penalty below 20% frequency
     lowCoveragePenalty = pmin(1, q$cov/10) #penalty below 10 reads coverage
 
     somaticP = (1-pPolymorphic)*(1-pNormalFreq)*normalOK*pSampleOK*(1-pZero)*
@@ -384,6 +381,12 @@ setVariantLoss = function(variants, maxLoops = 99, verbose=T) {
     if ( verbose ) catLog('Variant loss estimated to above 25%, which is suspiciously high. Will not correct for reference bias.\n')
     assign('.variantLoss', 0, envir = .GlobalEnv)
   }
+    if ( variantLoss() < 0 ) {
+    warning('Variant loss estimated to be negative, which is not realistic. Will not correct for reference bias.\n')
+    if ( verbose ) catLog('Variant loss estimated to be negative, which is not realistic. Will not correct for reference bias.\n')
+    assign('.variantLoss', 0, envir = .GlobalEnv)
+  }
+
   return(.variantLoss)
 }
 
