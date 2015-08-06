@@ -188,9 +188,8 @@ selectGermlineHets = function(normalVariants, moreNormalVariants, sex, SNPs, min
 
   #Restrict to validated dbSNPs with population frequency > 1%
   catLog('Restrict to validated dbSNPs with population frequency > 1%...')
-  SNPs = SNPs[SNPs$x %in% normalVariants$x,]
-  isValidated = SNPs[as.character(normalVariants$x),]$dbValidated
-  isFrequent = SNPs[as.character(normalVariants$x),]$dbMAF > 0.01
+  isValidated = normalVariants$dbValidated & !is.na(normalVariants$dbValidated)
+  isFrequent = normalVariants$dbMAF > 0.01 & !is.na(normalVariants$dbMAF)
   use = use[isValidated & isFrequent]
   normalVariants = normalVariants[use,]
   catLog('done! Got', sum(isValidated & isFrequent), 'variants.\n')
