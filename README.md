@@ -1,16 +1,19 @@
 cnv-caller
 ==========
 
-A cnv, snv and clonality caller.
+A cnv, snv and clonality tracker.
 
 Best way to run it
 ==================
-is to download the self contained example,
-make sure that it runs properly, and then run on your own data.
+The pipeline uses some public resources, such as dbSNP and COSMIC data.
+Instead of downlaoding all those separately, it is easier
+to download the self contained example, containing all such resources for hg19,
+make sure that it runs properly, and then run on your own samples.
 
 1) download and unzip https://www.dropbox.com/s/egse96gb8n1xq4t/example.zip?dl=0
+*** This is currently not up to date! ***
 
-2) make sure you have all the needed R-packages. (or proceed to 3 and handle the errors)
+2) make sure you have all the needed R-packages. (or proceed to 3 and handle the errors as they come)
 
 3) Run the example. (this should confirm that the pipeline works on your computer)
 
