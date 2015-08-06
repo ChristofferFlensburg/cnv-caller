@@ -1,4 +1,41 @@
 
+#' Wrapper to run default superFreq analysis
+#'
+#' @param inputFiles A named list of input files, containing the entries metaDataFile, vcfFiles, normalDirectory, captureRegionsFile and dbSNPdirectory
+#' @param outputDirectories A named list of output directories, containing the entries Rdirectory and plotDirectory where the saved data and plots will be stored respectively.
+#' @keywords analyse exomes CNV clonality
+#'
+#' @details This function runs a full SNV, SNP, CNV and clonality analysis in the input exome data.
+#'          Note that a lot of settings go by default, such as base quality offset (33) and genome (hg19).
+#'
+#' @export
+#' @import limma edgeR Rsubread parallel Rsamtools GenomicRanges R.oo rtracklayer WriteXLS fields seqinr biomaRt
+#'
+#' @examples
+#' \dontrun{
+#' inputFiles = superInputFiles(metaData='path/to/metaData.tsv',
+#'                              captureRegions='path/to/captureRegions.bed',
+#'                              normalDirectory='path/to/normalDirectory',
+#'                              dbSNPdirectory='path/to/dbSNPdirectory',
+#'                              reference='path/to/reference.fa')
+#' 
+#' outputDirectories = superOutputDirectories(Rdirectory='where/I/want/to/save/the/data',
+#'                                            plotDirectory='where/the/plots/will/go')
+#' 
+#' data = superAnalyse(inputFiles, outputDirectories)
+#'
+#' }
+superAnalyse = function(inputFiles, outputDirectories, settings=defaultSuperSettings(), forceRedo=forceRedoNothing(),
+  runtimeSettings=defaultSuperRuntimeSettings(),
+  parameters=defaultSuperParameters(), byIndividual=T) {
+  return(analyse(inputFiles=inputFiles, outputDirectories=outputDirectories, settings=settings, forceRedo=forceRedo,
+                 runtimeSettings=runtimeSettings, parameters=parameters, byIndividual=byIndividual))
+}
+
+
+
+
+
 #' Analyse exomes
 #'
 #' @param inputFiles A named list of input files, containing the entries metaDataFile, vcfFiles, normalDirectory, captureRegionsFile and dbSNPdirectory
@@ -12,34 +49,10 @@
 #'          Set up input data as is shown in the example.
 #'
 #' @export
-#' @examples
-#' cpus=4
-#' metaDataFile = '/absolute/path/to/myAnalysis/metaData.txt'
-#' vcfFiles = list.files('/absolute/path/to/myAnalysis/vcf', pattern='chr[0-9XYMT]+.vcf$', full.names=T)
-#' captureRegionsFile = '/absolute/path/to/myAnalysis/captureRegions.gc.bed'
-#' dbSNPdirectory = '/absolute/path/to/myAnalysis/dbSNP'
-#' normalDirectory = '/absolute/path/to/myAnalysis/normal'
-#' normalCoverageDirectory = '/absolute/path/to/myAnalysis/normalCoverage'
-#' Rdirectory = '/absolute/path/to/myAnalysis/R/'
-#' plotDirectory = '/absolute/path/to/myAnalysis/plots/'
-#' 
-#' #The base quality phred offset. This can be read from fastqc analysis for example.
-#' BQoffset = 33
-#' genome = 'hg19'
-#' 
-#' inputFiles = list('metaDataFile'=metaDataFile, 'vcfFiles'=vcfFiles, 'normalDirectory'=normalDirectory,
-#' 'captureRegionsFile'=captureRegionsFile, 'dbSNPdirectory'=dbSNPdirectory)
-#' outputDirectories = list('Rdirectory'=Rdirectory, 'plotDirectory'=plotDirectory)
-#' runtimeSettings = list('cpus'=cpus, 'outputToTerminalAsWell'=T)
-#'
-#' forceRedo = forceRedoNothing()
-#' parameters = list('systematicVariance'=0.03, 'maxCov'=150)
-#'
-#' data = analyse(inputFiles, outputDirectories, settings, forceRedo, runtimeSettings, parameters=parameters)
 #'
 #' @import limma edgeR Rsubread parallel Rsamtools GenomicRanges R.oo rtracklayer WriteXLS fields
 #'
-#' @example
+#' @examples
 #' \dontrun{
 #' metaDataFile = '/absolute/path/to/metaData.txt'
 #'
@@ -77,7 +90,7 @@
 #'
 #' }
 analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSettings,
-  parameters=list('systematicVariance'=0.02, 'maxCov'=100), byIndividual=F) {
+  parameters=list('systematicVariance'=0.03, 'maxCov'=150), byIndividual=F) {
   loadMethods(byIndividual=byIndividual)
 
   if ( !all(c('Rdirectory', 'plotDirectory') %in% names(outputDirectories)) )
@@ -104,8 +117,10 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
          '\n######################################################################\n')
 
 
-  if ( !all(c('metaDataFile', 'vcfFiles', 'normalDirectory', 'captureRegionsFile', 'dbSNPdirectory') %in% names(inputFiles)) )
-    stop('inputFiles need all entries: metaDataFile, vcfFiles, normalDirectory, captureRegionsFile, dbSNPdirectory.')
+  neededInput = c('metaDataFile', 'vcfFiles', 'normalDirectory', 'captureRegionsFile', 'dbSNPdirectory')
+  if ( byIndividual ) neededInput = c('metaDataFile', 'normalDirectory', 'captureRegionsFile', 'dbSNPdirectory')
+  if ( !all(neededInput %in% names(inputFiles)) )
+    stop(paste(c('inputFiles need all entries:', neededInput), collapse=' '))
   if ( !all(c('BQoffset', 'genome') %in% names(settings)) )
     stop('settings need all entries: BQoffset, genome.')
   if ( !all(c('cpus') %in% names(runtimeSettings)) )
@@ -116,8 +131,8 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   genome = settings$genome
   sampleMetaDataFile = inputFiles$metaDataFile
   vcfFiles = inputFiles$vcfFiles
-  if ( 'fastaFile' %in% names(inputFiles) ) fastaFile = inputFiles$fastaFile
-  else fastaFile = ''
+  if ( 'reference' %in% names(inputFiles) ) reference = inputFiles$reference
+  else reference = ''
   normalDirectory = inputFiles$normalDirectory
   normalRdirectory = paste0(normalDirectory, '/R')
   if ( !file.exists(normalRdirectory) ) {
@@ -146,9 +161,11 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   if ( class(sampleMetaDataFile) != 'character' ) stop('sampleMetaDataFile needs to be of class character.')
   if ( !file.exists(sampleMetaDataFile) ) stop('sampleMetaDataFile ', sampleMetaDataFile, ' not found.')
 
-  if ( !exists('vcfFiles') ) stop('Need to set vcfFiles!')
-  if ( class(vcfFiles) != 'character' ) stop('vcfFiles needs to be of class character.')
-  for ( vcfFile in vcfFiles ) if ( !file.exists(vcfFile) ) stop('vcfFile ', vcfFile, ' not found.')
+  if ( !byIndividual ) {
+    if ( !exists('vcfFiles') ) stop('Need to set vcfFiles!')
+    if ( class(vcfFiles) != 'character' ) stop('vcfFiles needs to be of class character.')
+    for ( vcfFile in vcfFiles ) if ( !file.exists(vcfFile) ) stop('vcfFile ', vcfFile, ' not found.')
+  }
   
   if ( !exists('normalDirectory') ) stop('Need to set normalDirectory!')
   if ( class(normalDirectory) != 'character' ) stop('normalDirectory needs to be of class character.')
@@ -278,7 +295,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   catLog('Normal coverage bamfiles are:\n')
   catLog(externalNormalCoverageBams, sep='\n')
 
-  captureRegions = try(importCaptureRegions(captureRegionsFile, fastaFile=fastaFile, genome=genome))
+  captureRegions = try(importCaptureRegions(captureRegionsFile, reference=reference, Rdirectory=Rdirectory, genome=genome))
   if ( class(captureRegions) != 'GRanges' ) {
     catLog('Failed to import capture regions, aborting.\n')
     stop('Failed to import capture regions, aborting.\n')
@@ -310,7 +327,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
     catLog('Missing columns in meta data:' , missing, ', aborting.\n')
     stop('Missing columns in meta data:' , missing, ', aborting.\n')
   }
-  if ( !all(captureRegions$NORMAL %in% c('YES', 'NO')) ) {
+  if ( !all(sampleMetaData$NORMAL %in% c('YES', 'NO')) ) {
     catLog('Want only YES or NO in normal column, aborting.\n')
     stop('Want only YES or NO in normal column, aborting.\n')
   }
@@ -397,7 +414,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
       #Get variants from the external normals
       normalVariants =
         try(getNormalVariants(variants, externalNormalBams, names(externalNormalBams), captureRegions,
-                        genome, BQoffset, normalRdirectory, Rdirectory, plotDirectory, cpus=cpus,
+                        genome, BQoffset, dbSNPdirectory, normalRdirectory, Rdirectory, plotDirectory, cpus=cpus,
                         forceRedoSNPs=forceRedoNormalSNPs, forceRedoVariants=forceRedoNormalVariants))
       if ( class(normalVariants) == 'try-error' ) {
         catLog('Error in getVariants for normals.\n')
@@ -520,12 +537,12 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
 #' @keywords load saved data
 #' @export
 #' @examples
-#' #not run
+#' \dontrun{
+#' not run
 #' data = loadData('~/myAnalysis/R', setVariantLoss=T)
 #' cnvs = data$clusters
 #' plotCR(cnvs[['aSample']]$clusters)
-#' #end not run
-
+#' }
 loadData = function(Rdirectory, setVariantLoss=F) {
   saveFiles = list.files(Rdirectory, pattern = '*.Rdata', full.names=T)
   names = gsub('.Rdata$', '', basename(saveFiles))
@@ -533,6 +550,10 @@ loadData = function(Rdirectory, setVariantLoss=F) {
   if ( 'allVariants' %in% names ) {
     saveFiles = saveFiles[!(names %in% c('variants', 'normalVariants', 'SNPs'))]
     names = names[!(names %in% c('variants', 'normalVariants', 'SNPs'))]
+  }
+  if ( 'fit' %in% names ) {
+    saveFiles = saveFiles[!(names %in% c('fitP'))]
+    names = names[!(names %in% c('fitP'))]
   }
   names(names) = saveFiles
   cat('Loading..')
@@ -550,11 +571,11 @@ loadData = function(Rdirectory, setVariantLoss=F) {
   return(ret)
 }
 
-#' Loads methods.
+#' Not needed in the package, ignore this function.
 #'
 #' This function loads the analysis functions used in analyse().
 #' @keywords load methods analyse
-#' @export
+#'
 #' @examples
 #' loadMethods()
 loadMethods = function(stringsAsFactors = FALSE, byIndividual=F) {
@@ -654,9 +675,10 @@ loadMethods = function(stringsAsFactors = FALSE, byIndividual=F) {
 #' returns input that uses saved data if present.
 #'
 #' @details This function returns the input 'forceRedo' for analyse(), so that saved data
-#'          from previous runs is used if present. This should be the input in almost all cases.
+#'          from previous runs is used if present. This should be the input normally.
 #' @export
 #' @examples
+#' \dontrun{
 #' cpus=4
 #' metaDataFile = '/absolute/path/to/myAnalysis/metaData.txt'
 #' vcfFiles = list.files('/absolute/path/to/myAnalysis/vcf', pattern='chr[0-9XYMT]+.vcf$', full.names=T)
@@ -679,7 +701,7 @@ loadMethods = function(stringsAsFactors = FALSE, byIndividual=F) {
 #' parameters = list('systematicVariance'=0.03, 'maxCov'=150)
 #'
 #' data = analyse(inputFiles, outputDirectories, settings, forceRedo, runtimeSettings, parameters=parameters)
-#'
+#' }
 forceRedoNothing = function() list(
   'forceRedoCount'=F,
   'forceRedoNormalCount'=F,
@@ -704,9 +726,10 @@ forceRedoNothing = function() list(
 #' returns input that uses saved data if present.
 #'
 #' @details This function returns the input 'forceRedo' for analyse(), so that all the
-#'          analysis is redone, even if previously saved data exists.
+#'          analysis is redone, overwriting previously saved data exists.
 #' @export
 #' @examples
+#' \dontrun{
 #' cpus=4
 #' metaDataFile = '/absolute/path/to/myAnalysis/metaData.txt'
 #' vcfFiles = list.files('/absolute/path/to/myAnalysis/vcf', pattern='chr[0-9XYMT]+.vcf$', full.names=T)
@@ -719,7 +742,7 @@ forceRedoNothing = function() list(
 #' #The base quality phred offset. This can be read from fastqc analysis for example.
 #' BQoffset = 33
 #' genome = 'hg19'
-#' 
+#'
 #' inputFiles = list('metaDataFile'=metaDataFile, 'vcfFiles'=vcfFiles, 'normalDirectory'=normalDirectory,
 #' 'captureRegionsFile'=captureRegionsFile, 'dbSNPdirectory'=dbSNPdirectory)
 #' outputDirectories = list('Rdirectory'=Rdirectory, 'plotDirectory'=plotDirectory)
@@ -729,7 +752,7 @@ forceRedoNothing = function() list(
 #' parameters = list('systematicVariance'=0.03, 'maxCov'=150)
 #'
 #' data = analyse(inputFiles, outputDirectories, settings, forceRedo, runtimeSettings, parameters=parameters)
-#'
+#' }
 forceRedoEverything = function() list(
   'forceRedoCount'=T,
   'forceRedoNormalCount'=T,
@@ -751,7 +774,13 @@ forceRedoEverything = function() list(
   'forceRedoStories'=T,
   'forceRedoRiver'=T)
 
-
+#' Wrapper for getting settings, containing defaults for missing values.
+#'
+#' @param settings A named list of settings.
+#' @param name The setting to be retrieved.
+#'
+#' @details If the setting is present in the list, just return settings[[name]].
+#'          Otherwise return a default value.
 getSettings = function(settings, name) {
   #if set, return the set value
   if ( name %in% names(settings) ) return(settings[[name]])
@@ -771,5 +800,154 @@ getSettings = function(settings, name) {
   return(NA)
 }
 
+
+
+#' sets up and checks the input files for superFreq
+#'
+#' @details Returns the input files in a format to be passed to analyse(). Returns detailed information about the required input files if missing.
+#' @export
+#' @examples
+#' superInputFiles()
+superInputFiles = function(metaData='', captureRegions='', normalDirectory='', dbSNPdirectory='', reference='', normalCoverageDirectory='') {
+  if ( metaData == '' )
+    cat('Please provide a (absolute or relative from current directory) path to a metaData file.\n',
+        'This is a tab separated file with the mandatory columns\n',
+        'BAM\tVCF\tNAME\tINDIVIDUAL\tNORMAL\tTIMEPOINT\n\n',
+        'Each row corresponds to one sample to be analysed.\n\n',
+        'BAM: path (absolute or relative from metaData file) to bam file of sample.\n',
+        'VCF: path (absolute or relative from metaData file) to vcf file of sample. This should include both somatic and germline variants. The variants will undergo further filtering, so it is not a problem if the .vcf includes false positives, although large number of entries in the .vcf increases run time.\n',
+        'NAME: unique identifier of the sample. The names will be converted to standard R names, which involves replacing separators (such as space, dash or underscore) with dots.\n',
+        'INDIVIDUAL: unique identifier of the indiviudal the sample comes from. This information is used pair up matched normal samples for somatic mutation filtering, and for identifying germline heterozygous SNPs. This column is also used to group samples that should be compared to each other: all samples from the same individual are analysed together, and mutations are tracked between the samples.\n',
+        'NORMAL: Should be YES if the sample is normal, NO otherwise. A normal sample is assumed to have no somatic mutations. In practice, a tumor burden below a few percent works effectively as a normal, but tumor burdens above 10% in a sample marked as normal can cause severely reduced sensitivity in cancer samples from the same indiviudal.\n',
+        'TIMEPOINT: Mostly used as label in plots together with the sample. Can be Diagnosis, Relapse, resistant or similar labels. Does not influence the analyss otherwise.')  #Probably time to remove the TIMEPOINT column from required...
+  
+  if ( captureRegions == '' )
+    cat('Please provide a (absolute or relative from current directory) path to a captureRegions file.\n',
+        'This should be a .bed file: a tab separated file with the first three columns chromosome, start, end.\n')
+  
+  if ( normalDirectory == '' )
+    cat('Please provide a (absolute or relative from current directory) path to a normalDirectory.\n',
+        'The directory should contain (links to) .bam and .bam.bai for the pool of normal samples.\n',
+        'These samples can, but dont have to, be matched normals of the analysed samples.\n',
+        'They do need to be from the same capture though, and better if they share error sources with the cancer samples.\n',
+        'At least two are required (to estimate variance), but more are better (although slower).\n')
+
+  if ( dbSNPdirectory == '' )
+    cat('Please provide a (absolute or relative from current directory) path to the dbSNP directory.\n',
+        'This directory is provided with the example for hg19.\n')
+  
+  if ( reference == '' )
+    cat('Please provide a (absolute or relative from current directory) path to the reference.\n',
+        'This should be a fasta file, with an index.\n')
+
+  if ( normalCoverageDirectory == '' )
+    normalCoverageDirectory = normalDirectory
+
+  ret = list('metaDataFile'=normalizePath(metaData), 'normalDirectory'=normalizePath(normalDirectory),
+          'normalCoverageDirectory'=normalizePath(normalCoverageDirectory), 'reference'=normalizePath(reference),
+          'captureRegionsFile'=normalizePath(captureRegions), 'dbSNPdirectory'=normalizePath(dbSNPdirectory))
+
+  if ( any(ret=='') ) {
+    cat('\nReturning empty, as there are required input files not provided.\n')
+    return()
+  }
+
+  return(ret)
+}
+
+
+#' Sets up and checks the output directories. 
+#'
+#' @details Outputs some infomration about what the paths should be if called empty.
+#' @export
+#' @examples
+#' superOutputDirectories()
+superOutputDirectories = function(Rdirectory='', plotDirectory='') {
+
+  if ( Rdirectory == '' )
+    cat('Please provide a (absolute or relative from current directory) path to save results in .Rdata format.\n')
+
+  if ( plotDirectory == '' )
+    cat('Please provide a (absolute or relative from current directory) path to save plots in.\n')
+
+  
+  parentRdirectory = dirname(Rdirectory)
+  if ( !file.exists(parentRdirectory) ) stop('Parent directory of the R directory doesnt exist. Aborting.')
+  if ( !file.exists(Rdirectory) ) dir.create(Rdirectory)
+  parentPlotDirectory = dirname(plotDirectory)
+  if ( !file.exists(parentPlotDirectory) ) stop('Parent directory of the plot directory doesnt exist. Aborting.')
+  if ( !file.exists(plotDirectory) ) dir.create(plotDirectory)
+  return(list('Rdirectory'=normalizePath(Rdirectory), 'plotDirectory'=normalizePath(plotDirectory)))
+}
+
+
+#' checks if a file exists, and creates an error if it doesnt. 
+#'
+#' @details Internal method to give approapriate errors for missing files.
+#' @examples
+#' requireFileExists('a/path/to/a/file.txt')
+requireFileExists = function(file) {
+  if ( !file.exists(file) ) stop('required file', file, 'not found.\n')
+  return(TRUE)
+}
+
+
+
+
+#' Returns default settings 
+#'
+#' @details feed the output of this function to analyse, or just call superAnalyse.
+#' @examples
+#' defaultSuperSettings()
+defaultSuperSettings = function(genome='', BQoffset='') {
+  if ( genome == '' ) {
+    cat('Defaulting genome to hg19.\n')
+    genome = 'hg19'
+  }
+  if ( BQoffset == '' ) {
+    cat('Defaulting base quality offset to 33.\n')
+    BQoffset = 33
+  }
+
+  return(list(genome=genome, BQoffset=BQoffset))
+}
+
+
+#' Returns default runtime settings 
+#'
+#' @details feed the output of this function to analyse, or just call superAnalyse.
+#' @examples
+#' defaultSuperRuntimeSettings()
+defaultSuperRuntimeSettings = function(cpus='', outputToTerminalAsWell='') {
+  if ( cpus == '' ) {
+    cat('Defaulting maximum parallel cpus used to 3.\n')
+    cpus = 4
+  }
+  if ( outputToTerminalAsWell == '' ) {
+    cat('Defaulting outputToTerminalAsWell to TRUE.\n')
+    outputToTerminalAsWell = TRUE
+  }
+
+  return(list(cpus=cpus, outputToTerminalAsWell=outputToTerminalAsWell))
+}
+
+
+#' Returns default parameters 
+#'
+#' @details feed the output of this function to analyse, or just call superAnalyse.
+#' @examples
+#' defaultSuperParameters()
+defaultSuperParameters = function(systematicVariance='', maxCov='') {
+  if ( systematicVariance == '' ) {
+    cat('Defaulting systematicVariance used to 0.03.\n')
+    systematicVariance = 0.03
+  }
+  if ( maxCov == '' ) {
+    cat('Defaulting maxCov to 150.\n')
+    maxCov = 150
+  }
+
+  return(list(systematicVariance=systematicVariance, maxCov=maxCov))
+}
 
 

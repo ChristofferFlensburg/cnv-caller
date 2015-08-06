@@ -197,7 +197,7 @@ addStreamSegment = function(x1, x2, y1low, y1high, y2low, y2high, range=c(0,1), 
 }
 
 
-plotStories = function(stories, SNPs, col='default', lty='default', add=F, alpha=1, xlab='sample', ylab='clonality', lwd='default', errorBars=T, setPar=T, legend=T, labels=T, xlim='default', genome='hg19',...) {
+plotStories = function(stories, SNPs, col='default', lty='default', add=F, alpha=1, xlab='sample', ylab='clonality', lwd='default', errorBars=T, setPar=T, legend=T, labels=T, xlim='default', genome='hg19', xSpread=0.25,...) {
   names = rownames(stories)
   clon = stories$stories
   ce = stories$errors
@@ -236,13 +236,13 @@ plotStories = function(stories, SNPs, col='default', lty='default', add=F, alpha
     plot(0,0, type='n', xlim=xlim, ylim=c(-.02,1), xlab=xlab, ylab=ylab, xaxt='n', frame.plot=F, ...)
   }
   if (lwd[1] == 'default' ) lwd = 1/(sqrt(0.1^2+ce[,1:(Nsample-1)]^2 + ce[,2:Nsample]^2)/0.2)^2
-  segments(col(clon)[,1:(Nsample-1)]+(row(clon)[,1:(Nsample-1)] - 0.5 - Nmut/2)/Nmut/4, clon[,1:(Nsample-1)],
-           col(clon)[,2:Nsample    ]+(row(clon)[,2:Nsample    ] - 0.5 - Nmut/2)/Nmut/4, clon[,2:Nsample    ],
+  segments(col(clon)[,1:(Nsample-1)]+(row(clon)[,1:(Nsample-1)] - 0.5 - Nmut/2)/Nmut*xSpread, clon[,1:(Nsample-1)],
+           col(clon)[,2:Nsample    ]+(row(clon)[,2:Nsample    ] - 0.5 - Nmut/2)/Nmut*xSpread, clon[,2:Nsample    ],
            col=segcol, lwd=lwd, lty=seglty)
   if ( errorBars ) {
     if (lwd[1] == 'default' ) lwd = 1/(sqrt(0.1^2+ce^2)/0.2)^2
-    segments(col(clon)+(row(clon) - 0.5 - Nmut/2)/Nmut/4, noneg(clon - ce),
-             col(clon)+(row(clon) - 0.5 - Nmut/2)/Nmut/4, clon + ce,
+    segments(col(clon)+(row(clon) - 0.5 - Nmut/2)/Nmut*xSpread, noneg(clon - ce),
+             col(clon)+(row(clon) - 0.5 - Nmut/2)/Nmut*xSpread, clon + ce,
              col=errcol, lwd=lwd, lty=errlty)
   }
 
@@ -273,34 +273,42 @@ heatmapStories = function(stories, storyList, SNPs, labels=NA, genome='hg19') {
   rownames(clon) = labels
 
 
-  nRect = 200
-  cols = colourGradient(cols=mcri(c('white', 'cyan', 'blue', 'red')),
-    anchors=c(0, 0.25, 0.5, 1), steps=nRect)
   if ( nrow(clon) < 1000 )
-    heatmap(clon, scale='none', col=cols, RowSideColors=sideCol, Colv=NA)
+    makeHeatmap(clon, RowSideColors=sideCol, Colv=NA, label='clonality')
   else {
     catLog('Too many stories for the built-in heatmap clustering, using default row ordering.\n')
-    heatmap(clon, scale='none', col=cols, RowSideColors=sideCol, Colv=NA, Rowv=NA)
+    makeHeatmap(clon, RowSideColors=sideCol, Colv=NA, Rowv=NA)
   }
+}
 
+
+makeHeatmap = function(mx, nCol=200, col='default', maxVal='default', minVal='default', scale='none', label='', ...) {
+  if ( maxVal == 'default' ) maxVal = max(mx)
+  if ( minVal == 'default' ) minVal = min(mx)
+  if ( col == 'default' )
+    col = colourGradient(cols=mcri(c('white', 'cyan', 'blue', 'red')),
+      anchors=c(0, 0.2, 0.5, 1), steps=nCol)
+  ret = heatmap(mx, col=col, scale=scale, ...)
+  
   barXmax = par('usr')[1]*0.88+par('usr')[2]*0.12
   barXmin = par('usr')[1]*0.92+par('usr')[2]*0.08
   barYmin = par('usr')[3]*0.8+par('usr')[4]*0.2
   barYmax = par('usr')[3]*0.2+par('usr')[4]*0.8
-  lowY = barYmin + (0:(nRect-1))*(barYmax-barYmin)/nRect
-  highY = barYmin + (1:nRect)*(barYmax-barYmin)/nRect
-  lowX = rep(barXmin, nRect)
-  highX = rep(barXmax, nRect)
-  barCols = cols
+  lowY = barYmin + (0:(nCol-1))*(barYmax-barYmin)/nCol
+  highY = barYmin + (1:nCol)*(barYmax-barYmin)/nCol
+  lowX = rep(barXmin, nCol)
+  highX = rep(barXmax, nCol)
+  barCols = col
   rect(lowX, lowY, highX, highY, col=barCols, border=F)
   segments(rep(barXmin, 3), barYmin + c(0.002, 0.5, 0.998)*(barYmax-barYmin),
            rep(barXmin-(barXmax-barXmin)*0.1, 3), barYmin + c(0.002, 0.5, 0.998)*(barYmax-barYmin),
-           lwd=2, col=barCols[c(1, round(nRect/2), nRect)])
-  minDist = min(clon)
-  maxDist = max(clon)
+           lwd=2, col=barCols[c(1, round(nCol/2), nCol)])
+  minDist = minVal
+  maxDist = maxVal
   text(rep(barXmin-(barXmax-barXmin)*0.2, 4), barYmin + c(0.003, 0.5, 0.997, 1.07)*(barYmax-barYmin),
-       c(round(c(minDist, (minDist+maxDist)/2, maxDist), 2), 'clonality'), adj=c(1, 0.5))
+       c(round(c(minDist, (minDist+maxDist)/2, maxDist), 2), label), adj=c(1, 0.5))
 
+  invisible(ret)
 }
 
 

@@ -17,7 +17,7 @@
 #'
 importSampleMetaData = function(sampleMetaDataFile) {
   catLog('Loading sample meta data from file...')
-  metaData = read.table(sampleMetaDataFile, header=T, as.is=T, fill=T, sep='\t')
+  metaData = read.table(sampleMetaDataFile, header=T, as.is=T, fill=T)
   if ( any(!(c('BAM', 'INDIVIDUAL', 'NAME', 'NORMAL') %in% colnames(metaData))) )
     stop('Could not find required columns BAM, INDIVIDUAL, NAME, NORMAL in sample meta data.\n
 The meta data file should be a tab separated file with headings.\n')

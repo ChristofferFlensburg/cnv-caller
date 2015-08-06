@@ -75,7 +75,7 @@ getVariantsByIndividual = function(metaData, captureRegions, genome, BQoffset, d
   q = do.call(rbind, variantsBI)
   q = q[!duplicated(q$x),]
   q = q[order(q$x),]
-  inGene = xToGene(q$x)
+  inGene = xToGene(q$x, saveDirectory=Rdirectory)
   names(inGene) = q$x
   SNPs = data.frame(x=q$x, chr=xToChr(q$x), start=xToPos(q$x), end=xToPos(q$x),
                     inGene=inGene, reference=q$reference, variant=q$variant, db=q$db)
@@ -264,7 +264,13 @@ getQuality = function(file, chr, pos, BQoffset, cpus=1) {
   which = GRanges(chr, IRanges(pos-3, pos+3))
   p1 = ScanBamParam(which=which, what=c('pos', 'seq', 'cigar', 'qual', 'mapq', 'strand'),
     flag=scanBamFlag(isSecondaryAlignment=FALSE))
-  regionReads = scanBam(file, param=p1)
+  index = paste0(file, '.bai')
+  if ( !file.exists(index) ) {
+    index = gsub('.bam$', '.bai', file)
+    if ( !file.exists(index) )
+      stop(paste('Could not find an index file for', file, '\nI want either', paste0(file, '.bai'), 'or', index))
+  }
+  regionReads = scanBam(file, index=index, param=p1)
   before = sum(sapply(regionReads, function(reads) length(reads$mapq)))
   regionReads = lapply(regionReads, function(reads) {
     keep = reads$mapq > 0 & !is.na(reads$mapq)
@@ -677,7 +683,7 @@ inGene = function(SNPs, genes, noHit = NA, genome='hg19') {
 
 #Takes the sample variants and normal bam files and capture regions.
 #return the variant information for the normals on the positions that the samples are called on.
-getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, BQoffset, normalRdirectory, Rdirectory, plotDirectory, cpus, forceRedoSNPs=F, forceRedoVariants=F) {
+getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, BQoffset, dbDir, normalRdirectory, Rdirectory, plotDirectory, cpus, forceRedoSNPs=F, forceRedoVariants=F) {
   SNPs = variants$SNPs
   variants = variants$variants
 
@@ -768,43 +774,3 @@ getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, 
   return(normalVariantsBI)
 }
 
-
-
-xToGene = function(x, genome='hg19') {
-  catLog('Linking', length(x), 'SNV positions to genes...')
-  chr = xToChr(x, genome)
-  pos = xToPos(x, genome)
-  catLog('waiting for biomaRt/ensembl server...')
-  if ( genome == 'hg19' )
-    mart = useMart(biomart='ensembl', dataset = 'hsapiens_gene_ensembl',
-      version='Ensembl Genes', host='grch37.ensembl.org')
-  else stop('hg19 is only supported genome atm, sorry. :(')
-
-  bm = getBM(attributes=c('chromosome_name', 'start_position', 'end_position', 'hgnc_symbol', 'ensembl_transcript_id'), filters = c('chromosome_name', 'start', 'end'), value=list(chr, pos-1000, pos+1000), mart=mart)
-
-  #make sure any empty symbol entries are last, so that we can default to first hit
-  bm = bm[order(bm$hgnc_symbol, decreasing=T),]
-  #replace empty symbol entries with ensemble code and remove duplicates
-  bm$hgnc_symbol[bm$hgnc_symbol == ''] = bm$ensembl_transcript_id[bm$hgnc_symbol == '']
-  bm = bm[!duplicated(bm$hgnc_symbol),]
-
-  #match variant positions to genes ranges
-  catLog('matching ranges to positions...')
-  geneRanges = GRanges(seqnames=bm$chromosome_name, ranges = IRanges(start=bm$start_position, end=bm$end_position, names=bm$hgnc_symbol), strand='*')
-  variantRanges = GRanges(seqnames=chr, ranges = IRanges(start=pos, end=pos, names=x), strand='*')
-  OLs = as.matrix(findOverlaps(variantRanges, geneRanges, maxgap=500))
-  #remove duplicates, leaving only first hit for each variant
-  OLs = OLs[!duplicated(OLs[,1]),]
-  
-  rownames(OLs) = OLs[,1]
-
-  genes = sapply(1:length(x), function(i) {
-    rowname = as.character(i)
-    if ( rowname %in% rownames(OLs) ) return(names(geneRanges)[OLs[rowname,2]])
-    return('?')
-    })
-  if ( sum(genes == '?') > 0 ) catLog('failed', sum(genes == '?'), 'positions...')
-  catLog('done.\n')
-
-  return(genes)
-}

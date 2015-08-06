@@ -42,20 +42,19 @@ matchFlagVariants = function(variants, normalVariants, individuals, normals, Rdi
 
 #helper function that ensures that the first variants object have all the variants.
 matchVariants = function(vs1, vs2) {
-  catLog('Matching variants..')
+  catLog('Matching', nrow(vs1$variants[[1]]), 'against', nrow(vs2$variants[[1]]), 'variants..')
   vs1$variants = matchInternalQs(vs1$variants)
   vs2$variants = matchInternalQs(vs2$variants)
   vs1$variants = matchQs(vs1$variants, vs2$variants)
   vs1$SNPs = shareSNPs(vs1$SNPs, vs2$SNPs)
   vs1$SNPs = vs1$SNPs[order(vs1$SNPs$x, vs1$SNPs$variant),]
-  catLog('done.\n')
+  catLog('to', nrow(vs1$variants[[1]]), 'variants.\n')
   return(vs1)
 }
 matchQs = function(qs1, qs2) {
   vs1Vars = rownames(qs1[[1]])
   vs2Vars = rownames(qs2[[1]])
   newV1 = setdiff(vs2Vars, vs1Vars)
-  catLog(length(vs1Vars) , 'and', length(vs2Vars), 'combine to', length(vs1Vars)+length(newV1), 'variants..')
   is = which(vs2Vars %in% newV1)
   newVars = data.frame(
     x = qs2[[1]]$x[is],
@@ -84,12 +83,10 @@ matchQs = function(qs1, qs2) {
   
   #make sure the new variants have the columns of qs2 and qs1
   for ( col in setdiff(union(names(qs1[[1]]), names(qs2[[1]])), names(newVars)) ) {
-    catLog('adding ', col, '..', sep='')
     newVars[[col]] = rep(NA, nrow(newVars))
   }
   #then make sure qs1 have the columns of the new variants (which will include qs2)
   for ( col in setdiff(names(newVars), names(qs1[[1]])) ) {
-    catLog('adding ', col, '..', sep='')
     qs1 = lapply(qs1, function(q) {q[[col]] = rep(NA, nrow(q)); return(q)})
   }
   #we are now ready to rbind the data frames
@@ -101,20 +98,13 @@ matchQs = function(qs1, qs2) {
 #makes sure all variant data frames in the list qs has all the rows
 #if not available, a token entry with coverage 0 is used.
 matchInternalQs = function(qs) {
-  catLog('Matching variants between individuals..')
   if ( length(qs) < 2 ) return(qs)
-  catLog('Matching first sample to sample..')
   for ( i in 2:length(qs) ) {
-    catLog(i, '..', sep='')
     qs[1] = matchQs(qs[1], qs[i])
   }
-  catLog('done.\n')
-  catLog('Mathcing to first sample from sample..')
   for ( i in 2:length(qs) ) {
-    catLog(i, '..', sep='')
     qs[i] = matchQs(qs[i], qs[1])
   }
-  catLog('done.\n')
 return(qs)
 }
 
@@ -256,18 +246,25 @@ markSomatics = function(variants, normalVariants, individuals, normals, cpus=cpu
     pPolymorphic = 1/(1+nrow(q)/(polymorphicFrequency*basePairs))
     pNormalFreq = pBinom(q$cov, q$var, normalFreq)
     normalOK = pmin(1, noneg((0.05-normalFreq)/0.05))^2*(normalFreq < freq)
+    catLog('No matched normal: removing all dbSNPs from the somatic candidates.\n', sep='')
     notInNormal = as.numeric(!q$db)
     if ( name %in% names(CNs) ) {
       catLog('Correcting somatics using matched normal.\n')
       qn = variants$variants[[correspondingNormal[name]]][use,]
-      psameF = unlist(mclapply(1:nrow(q), function(i)
+      referenceNormal = (qn$var <= 0.2*qn$cov)
+      pNormalHet = pBinom(qn$cov[referenceNormal], qn$var[referenceNormal], 0.3)
+      fdrNormalHet = p.adjust(pNormalHet, method='fdr')
+      referenceNormal[referenceNormal] = fdrNormalHet < 0.01
+      #check that there is a significant difference in the somatic vs matched normal if anything is seen in the normal
+      psameF = unlist(mclapply(which(referenceNormal), function(i)
         fisher.test(matrix(c(q$ref[i], q$var[i], qn$ref[i], qn$var[i]), nrow=2))$p.value,
         mc.cores=cpus))
-      FDR = p.adjust(psameF, method='fdr')
-      notInNormal[q$db] = (FDR < 0.01 & qn$var/qn$cov < 0.05 & qn$var/qn$cov < q$var/q$cov & (q$dbMAF < 0.01 | !q$dbValidated))[q$db]
-      catLog('Recovered ', sum(notInNormal[q$db]), ' dbSNP variants that behave as somatics in ', name, '.\n', sep='')
-      notInNormal[!q$db] = (psameF < 0.05)[!q$db]
-      normalOK = normalOK*(qn$cov == 0 | qn$var/qn$cov < 0.05)
+      candidates = q$var > 1 & qn$var < qn$cov*0.15
+      fdrSameF = rep(1, length(psameF))
+      fdrSameF[candidates] = p.adjust(psameF[candidates], method='fdr')
+      referenceNormal[referenceNormal] = fdrSameF < 0.05
+      notInNormal = referenceNormal      
+      normalOK = ifelse(qn$cov == 0, 0.5, noneg(1 - 5*qn$var/qn$cov)) #penalty for non-zero normal frequency
     }
     pSampleOK = p.adjust(q$pbq, method='fdr')*p.adjust(q$pmq, method='fdr')*p.adjust(q$psr, method='fdr')
     pZero = p.adjust(dbinom(q$var, q$cov, 0.01), method='fdr')   #the base quality cut on 30 correpsonds to 0.001 wrong base calls.
@@ -290,8 +287,7 @@ findCorrespondingNormal = function(names, individuals, normals) {
   ret = sapply(1:length(names), function(name) {
     ind = individuals[name]
     isCancer = !normals[name]
-    if ( !isCancer ) return(NA)
-    hasNormal = any(normals & individuals == ind & names != name)
+    hasNormal = any(normals & individuals == ind & 1:length(names) != name)
     if ( !hasNormal ) return(NA)
     return(which(normals & individuals == ind & names != name)[1]) #fix this to support replicate normals!
   })

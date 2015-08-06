@@ -13,26 +13,40 @@
 #' captureRegions = importCaptureRegions('path/to/my/captureRegions.bed')
 #' plotColourScatter(captureRegions$gc, captureRegions$dn, xlab='GC content', ylab='binding strength')
 #'
-importCaptureRegions = function(bedFile, fastaFile, genome='hg19') {
+importCaptureRegions = function(bedFile, reference, Rdirectory, genome='hg19') {
+  saveFile = paste0(Rdirectory, '/captureRegions.Rdata')
+  if ( file.exists(saveFile) ) {
+    catLog('Loading capture regions..')
+    load(saveFile)
+    catLog('done.\n')
+    return(captureRegions)
+  }
   if ( !grepl('\\.bed$', bedFile) ) stop('Need .bed capture regions.')
-  bsFile = gsub('\\.bed$', '.dn.bed', bedFile)
+  bsFile = gsub('\\.bed$', '.named.dn.bed', bedFile)
   if ( !file.exists(bsFile) ) {
-    catLog('Couldt find a binding strength file at ', bsFile, ' Making one now.\n')
-    if ( fastaFile == '' ) stop('Need a fastaFile entry in the input files to calcuate binding strengths.')
-    addBindingStrength(bedFile, fastaFile)
+    catLog('Couldnt find a binding strength file at ', bsFile, ' Making one now.\n')
+    namedFile = gsub('\\.bed$', '.named.bed', bedFile)
+    if ( !file.exists(namedFile) ) {
+      catLog('Couldnt find a named capture region file at ', namedFile, '. Making one now.\n', sep='')
+      nameCaptureRegions(bedFile, namedFile, Rdirectory, genome)
+      catLog('Done and saved named file, now proceeding to binding strength.\n')
+    }
+    if ( reference == '' ) stop('Need a reference entry in the input files to calcuate binding strengths.')
+    addBindingStrength(namedFile, reference)
   }
   catLog('Loading capture regions...')
   cR = read.table(bsFile, fill=T, quote='')
   chrL = chrLengths(genome)
   use = gsub('chr', '',cR$V1) %in% names(chrL)
   cR = cR[use,]
-  gr = GRanges(ranges = IRanges(start=cR$V2, end = cR$V3),
+  captureRegions = GRanges(ranges = IRanges(start=cR$V2, end = cR$V3),
     seqnames=gsub('chr', '',cR$V1), seqlengths=chrL, region = gsub(',', '', gsub("\"", '', as.character(cR$V4))),
     gc = cR[[5]], dn = cR[[6]])
 
-  names(gr) = gr$region
+  names(captureRegions) = captureRegions$region
+  save(captureRegions, file=saveFile)
   catLog('done.\n')
-  return(gr)
+  return(captureRegions)
 }
 
 #helper functions that returns the lengths of the chromosomes of a genome.
@@ -71,7 +85,7 @@ mouseChrLengths = function() {
 chrLengths = function(genome='hg19') {
   if ( genome == 'hg19' ) return(humanChrLengths())
   else if ( genome == 'mm10' ) return(mouseChrLengths())
-  else stop('chrLengths doesnt know about genome', genome, '\n')
+  else stop('chrLengths doesnt know about genome ', genome, '\n')
 }
 
 
@@ -112,6 +126,73 @@ padCaptureRegions = function(inFile, outFile=gsub('.bed$', '.padded.bed', inFile
 }
 
 
-nameCaptureRegions = function(inFile, outFile, genome=100) {
+nameCaptureRegions = function(inFile, outFile, Rdirectory, genome='hg19') {
+  cr = read.table(inFile, fill=T, quote='')
+  chr = gsub('chr', '',cr$V1)
+  start = cr$V2
+  end = cr$V3
+
+  use = chr %in% names(chrLengths(genome))
+  if ( sum(!use) > 10 ) warning(paste0(sum(!use), ' rows in the capture region file does not match a chromosome in the genome ', genome, 'will use the remaining ', sum(use), 'rows.'))
+  if ( sum(use) == 0 ) stop('No rows in the capture regions start with a chromosome name. Aborting, sorry.')
+
+  x = chrToX(chr[use], (start+end)[use]/2, genome=genome)
+  gene = xToGene(x, genome=genome, saveDir=Rdirectory)
+
+  outDF = data.frame(chr, start, end, gene)
+  catLog('done.\n')
+
+  catLog('Printing to', outFile)
+  write.table(outDF, file=outFile, quote=F, col.names=F, row.names=F)
+  catLog(' done!\n')
+}
+
+
+
+xToGene = function(x, genome='hg19', saveDirectory='', verbose=T) {
+  if ( length(x) == 0 ) return(c())
+  saveFile = paste0(saveDirectory, '/ensembl', genome, 'annotation.Rdata')
+  if ( verbose ) catLog('Linking', length(x), 'positions to genes...')
+  chr = xToChr(x, genome)
+  pos = xToPos(x, genome)
+
+  if ( file.exists(saveFile) ) load(saveFile)
+  else {
+    if ( verbose ) catLog('waiting for biomaRt/ensembl server...')
+    if ( genome == 'hg19' )
+      mart = useMart(biomart='ensembl', dataset = 'hsapiens_gene_ensembl',
+        version='Ensembl Genes', host='grch37.ensembl.org')
+    else stop('hg19 is only supported genome atm, sorry. :(')
+    
+    bm = getBM(attributes=c('chromosome_name', 'start_position', 'end_position', 'hgnc_symbol', 'ensembl_transcript_id'), filters = c('chromosome_name', 'start', 'end'), value=list(chr, pos-1000, pos+1000), mart=mart)
+    
+    #make sure any empty symbol entries are last, so that we can default to first hit
+    bm = bm[order(bm$hgnc_symbol, decreasing=T),]
+    #replace empty symbol entries with ensemble code and remove duplicates
+    bm$hgnc_symbol[bm$hgnc_symbol == ''] = bm$ensembl_transcript_id[bm$hgnc_symbol == '']
+    bm = bm[!duplicated(bm$hgnc_symbol),]
+    
+    if ( file.exists(dirname(saveFile)) ) save(bm, file=saveFile)
+  }
+
+  #match variant positions to genes ranges
+  if ( verbose ) catLog('matching ranges to positions...')
+  geneRanges = GRanges(seqnames=bm$chromosome_name, ranges = IRanges(start=bm$start_position, end=bm$end_position, names=bm$hgnc_symbol), strand='*')
+  variantRanges = GRanges(seqnames=chr, ranges = IRanges(start=pos, end=pos, names=x), strand='*')
+  #allow hits up to 500bp away.
+  OLs = as.matrix(findOverlaps(variantRanges, geneRanges, maxgap=500))
+  #remove duplicates, leaving only first hit for each variant
+  OLs = OLs[!duplicated(OLs[,1]),]
   
+  rownames(OLs) = OLs[,1]
+
+  genes = sapply(1:length(x), function(i) {
+    rowname = as.character(i)
+    if ( rowname %in% rownames(OLs) ) return(names(geneRanges)[OLs[rowname,2]])
+    return('?')
+    })
+  if ( sum(genes == '?') > 0 & verbose ) catLog('failed', sum(genes == '?'), 'positions...')
+  if ( verbose ) catLog('done.\n')
+
+  return(genes)
 }

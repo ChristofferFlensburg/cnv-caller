@@ -67,6 +67,11 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
     catLog('Loaded normal counts of dimension', dim(normalFCsExon$counts), '\n')
   }
   catLog('Merging sample and normals counts..')
+  if ( nrow(fCsExon$counts) != nrow(normalFCsExon$counts) ) {
+    warning('Seems like the normals and the analysed samples are not counted over the same capture regions,\n',
+            'or at least they dont have the same number of counts.\n',
+           'Try redoing the counts for both by setting forceRedo$forceRedoCount and forceRedo$forceRedoNormalCount to TRUE.')
+  }
   counts = cbind(fCsExon$counts, normalFCsExon$counts)
   annotation = fCsExon$annotation
   catLog('done.\n')
@@ -204,6 +209,18 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
         plotfile = paste0(BSdirectory, col, '.overGenome.png')
         if ( !file.exists(plotfile) | forceRedoFit ) {
           ylim = quantile(LFC, probs=c(0.01, 0.99))+c(0.5,0.5)
+          png(plotfile, height=10, width=20, res=144, unit='in')
+          plotColourScatter(annotationToX(annotation), LFC, cex=w, ylim=ylim, xlab='genome',
+                            ylab='~log(1+read depth)', verbose=F)
+          points(annotationToX(annotation), (dn-mean(dn))/1.5 + mean(ylim), cex=w/2, pch=16,
+                 col=mcri('orange', 0.5))
+          addChromosomeLines(ylim=ylim, col=mcri('green'))
+          legend('bottomright', c('binding strength'), pch=16, col=mcri('orange'), bg='white')
+          dev.off()
+        }
+        plotfile = paste0(BSdirectory, col, '.overGenome.BScorrected.png')
+        if ( !file.exists(plotfile) | forceRedoFit ) {
+          ylim = quantile(LFC + log(correctionFactor), probs=c(0.01, 0.99))+c(0.5,0.5)
           png(plotfile, height=10, width=20, res=144, unit='in')
           plotColourScatter(annotationToX(annotation), LFC, cex=w, ylim=ylim, xlab='genome',
                             ylab='~log(1+read depth)', verbose=F)
@@ -419,7 +436,7 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   exonFit = contrasts.fit(exonFit, contrasts)
   exonFit = eBayes(exonFit)
   catLog('XRank..')
-  exonFit = XRank(exonFit, plot=F, cpus=cpus, verbose=T)
+  exonFit = XRank(exonFit, plot=F, cpus=cpus, verbose=T, keepPosterior=F)
   exonFit$x = annotationToX(annotation, genome=genome)
   x1x2 = annotationToX1X2(annotation, genome=genome)
   exonFit$x1 = x1x2[,1]
@@ -454,7 +471,7 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   fit = contrasts.fit(fit, contrasts)
   fit = eBayes(fit)
   catLog('XRank..')
-  fit = XRank(fit, plot=F, cpus=cpus, verbose=T)
+  fit = XRank(fit, plot=F, cpus=cpus, verbose=T, keepPosterior=F)
   fit$x1 = aggregate(exonFit$x1, list(rownames(counts)), FUN='min')[geneOrder,2]
   fit$x2 = aggregate(exonFit$x2, list(rownames(counts)), FUN='max')[geneOrder,2]
   fit$x = geneX

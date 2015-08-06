@@ -1,5 +1,11 @@
 
 
+#' Adds binding strength (essentailly same as GC content) to a bedfile.
+#'
+#' @param bedFile The bedfile.
+#' @param fastaFile The fasta file.
+#'
+#' @details Adds the bidning strength as a column to the bedfile, saving it as a copy, replacing .bed with .dn.bed
 addBindingStrength = function(bedFile, fastaFile, genome='hg19', forceRedo=F) {
   outFile = gsub('.bed$', '.dn.bed', bedFile)
   if ( !forceRedo & file.exists(outFile) ) {
@@ -27,7 +33,7 @@ addBindingStrength = function(bedFile, fastaFile, genome='hg19', forceRedo=F) {
   outDF = data.frame(seqnames(cr), start(cr), end(cr), names(cr), scores$baseScores, scores$dibaseScores)
   catLog('done.\n')
 
-  catLog('Printing to', outfile)
+  catLog('Printing to', outFile)
   write.table(outDF, file=outFile, quote=F, col.names=F, row.names=F)
   catLog(' done!\n')
 }

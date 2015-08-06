@@ -1,21 +1,32 @@
 
 
-runVEP = function(variants, dir, cpus=1, forceRedoVEP=F) {
+#' Run VEP on the provided variants
+#'
+#' @param variants variants: The variants to be VEPed.
+#' @param plotDir character: The plot directory where outputSomatics have been run.
+#' @param cpus integer: The number of cpus to be used as most.
+#' @param forceRedoVEP Logical: if VEP should be rerun even if saved data already exists.
+#'
+#' @details This function calls VEP on the output from outputSomaticVariants. For this, VEP needs to be callable by system('vep').
+runVEP = function(variants, plotDir, cpus=1, forceRedoVEP=F) {
   catLog('VEP-ing..')
+  dir = paste0(plotDir, '/somatics/')
   for ( name in names(variants$variants) ) {
     infile = paste0(dir, '/', name, '.txt')
     VEPfile = paste0(dir, '/', name, '.VEP.txt')
-    wd = getwd()
-    setwd(dir)
     if ( !file.exists(VEPfile) | forceRedoVEP ) {
+      wd = getwd()
+      catLog('Moving to ', dir, '\n')
+      setwd(dir)
       catLog(name, ': ', sum(variants$variants[[name]]$somaticP > 0), ' variants.\n', sep='')
       if ( sum(variants$variants[[name]]$somaticP > 0) == 0 ) next
       call = paste0('vep -i ', basename(infile), ' -o ', basename(VEPfile), ' --everything --force_overwrite --fork ', cpus)
-      cat(call, '\n')
+      catLog(call, '\n')
       systemRet = system(call, intern=T)
       if ( !any(grepl('Finished', systemRet)) ) warning('VEP run didnt finish!')
+      catLog('Moving back to ', wd, '\n')
+      setwd(wd)
     }
-    setwd(wd)
   }
   catLog('done.\n')
   
@@ -84,6 +95,11 @@ runVEP = function(variants, dir, cpus=1, forceRedoVEP=F) {
   return(variants)
 }
 
+#' Ranks the variant effects
+#'
+#' @param type character: The effect.
+#'
+#' @details Returns a low score for severe effects, higher for less severe, 100 for unknown. 11 and below alters the protein.
 typeToSeverity = function(type) {
   #first change some (older? newer?) notation into the ensemble SO terms
   type = gsub('non_coding_exon_variant', 'non_coding_transcript_exon_variant', type)
@@ -129,6 +145,11 @@ typeToSeverity = function(type) {
   return(100)
 }
 
+#' The variant effect as function of severity
+#'
+#' @param severity integer: The severity rank.
+#'
+#' @details Translated back from severity rank to the variant effect.
 severityToType = function(severity) {
   if ( severity == 1 ) return('transcript_ablation')
   if ( severity == 2 ) return('splice_acceptor_variant')
@@ -168,28 +189,19 @@ severityToType = function(severity) {
   return('unknown')
 }
 
-mergeVEPs = function(files) {
-  fileLines = lapply(files, function(file) {
-        allFile = read.table(file, sep='\n')
-        notComment = allFile[!grepl('^#', allFile)]
-        return(notComment)
-  })
-  
-  #remove the ID at first line?
-  
-  allLines = unique(unlist(fileLines))
-
-  #print to file
-}
 
 
-
-
-
-postAnalyseVEP = function(Rdirectory, plotDirectory, parameters, forceRedo=F) {
-  loadMethods()
-  assign('.maxCov', parameters$maxCov, envir = .GlobalEnv)
-  assign('.systematicVariance', parameters$systematicVariance, envir = .GlobalEnv)
+#' Runs VEP on a R and plot directory that superFreq has been run on.
+#'
+#' @param Rdirectory character: The R directory from the analyse call.
+#' @param plotDirectory character: The plot directory from the analyse call.
+#' @param forceRedo logical: If the analysis should be redone even if previously saved data is present.
+#'
+#' @details Runs VEP on the variants, and saves the variants (retrivable with loadData) with the addition
+#'          information from VEP. Or at least some of it.
+postAnalyseVEP = function(outputDirectories, inputFiles=inputFiles, cosmicDirectory='', forceRedo=F) {
+  Rdirectory = outputDirectories$Rdirectory
+  plotDirectory = outputDirectories$plotDirectory
   data = loadData(Rdirectory)
   if ( !('allVariants' %in% names(data)) ) {
     warning('Cant find a saved allVariants.\n')
@@ -204,7 +216,7 @@ postAnalyseVEP = function(Rdirectory, plotDirectory, parameters, forceRedo=F) {
   }
 
   variants = data$allVariants$variants
-  sampleMetaData = try(importSampleMetaData(metaDataFile))
+  sampleMetaData = importSampleMetaData(inputFiles$metaDataFile)
   normals = as.logical(gsub('YES', 'T', gsub('NO', 'F', sampleMetaData$NORMAL)))
   names = make.names(sampleMetaData$NAME, unique=T)
   names(normals) = names
@@ -212,25 +224,32 @@ postAnalyseVEP = function(Rdirectory, plotDirectory, parameters, forceRedo=F) {
   timePoints = sampleMetaData$TIMEPOINT
   names(timePoints) = names(individuals) = names
   samplePairs = metaToSamplePairs(names, individuals, normals)
+  timeSeries = metaToTimeSeries(names, individuals, normals)
     
-  source('runVEP.R')
-  vcfDir = paste0(plotDirectory, '/somatics')
-  variants = runVEP(variants, vcfDir, cpus=cpus, forceRedoVEP=forceRedo)
+  variants = runVEP(variants, plotDirectory, cpus=cpus, forceRedoVEP=forceRedo)
   allVariants = data$allVariants
   allVariants$variants = variants
   
   allVariantSaveFile = paste0(Rdirectory, '/allVariants.Rdata')
   save('allVariants', file=allVariantSaveFile)
-  
+
+  variants = getMoreVEPinfo(variants, plotDirectory, cosmicDirectory=cosmicDirectory)
   makeScatterPlots(variants, samplePairs, timePoints, plotDirectory, genome=genome, cpus=cpus, forceRedo=T)
   outputNewVariants(variants, samplePairs, genome, plotDirectory, cpus=cpus, forceRedo=T)
   outputSomaticVariants(variants, genome, plotDirectory, cpus=cpus, forceRedo=T)
-
+  makeSNPprogressionPlots(variants, timeSeries=timeSeries, normals = normals, plotDirectory=plotDirectory, forceRedo=T)
 }
 
 
 
-getMoreVEPinfo = function(variants, plotDirectory) {
+#' Import more information about the variants
+#'
+#' @param variants variants: The variants
+#' @param plotDirectory character: The plot directory from the analyse call.
+#'
+#' @details Extract almost all the information from the VEP run, and cross-checks with COSMIC data as well.
+#'          getCosmicCounts is called by this function, see details of that for requirements.
+getMoreVEPinfo = function(variants, plotDirectory, cosmicDirectory='') {
   dir = paste0(plotDirectory, '/somatics')
   catLog('Importing more VEP info:\n')
   for ( name in names(variants$variants) ) {
@@ -255,6 +274,7 @@ getMoreVEPinfo = function(variants, plotDirectory) {
       AAbefore = gsub('\\/.*$', '', VEPdata$V11)
       AAafter = gsub('^.*\\/', '', VEPdata$V11)
 
+      secondLastCol = strsplit(as.character(VEPdata$V13), ',')
       lastCol = strsplit(as.character(VEPdata$V14), ';')
       polyPhen = sapply(lastCol, function(strs) {
         if ( any(grepl('PolyPhen=', strs)) ) return(gsub('^PolyPhen=', '', strs[grep('PolyPhen=',strs)[1]]))
@@ -263,7 +283,7 @@ getMoreVEPinfo = function(variants, plotDirectory) {
       numericPolyPhen = sapply(lastCol, function(strs) {
         if ( any(grepl('PolyPhen=', strs)) )
           return(as.numeric(gsub('\\)$', '', gsub('^.*\\(', '', strs[grep('PolyPhen=',strs)[1]]))))
-        else return(0.05)
+        else return(0.0)
         })
 
       symbol = sapply(lastCol, function(strs) {
@@ -282,6 +302,15 @@ getMoreVEPinfo = function(variants, plotDirectory) {
         if ( any(grepl('DOMAINS=', strs)) ) return(gsub('\\,.*$', '', gsub('^DOMAINS=', '', strs[grep('DOMAINS=',strs)[1]])))
         else return('')
       })
+      cosmic = sapply(secondLastCol, function(strs) {
+        if ( any(grepl('COSM', strs)) ) return(strs[grep('COSM',strs)[1]])
+        else return('')
+      })
+      cosmicCounts = getCosmicCounts(cosmic, cosmicDirectory=cosmicDirectory)
+      isCosmicCensus = cosmicCounts$found
+      cosmicCounts = getCosmicCounts(cosmic, cosmicDirectory=cosmicDirectory, onlyCensus=F)
+      cosmicVariantDensity = cosmicCounts$variantDensity
+      cosmicGeneDensity = cosmicCounts$geneDensity
 
       namevar = var
       namevar[nchar(namevar) > 1] = paste0('+', substring(var[nchar(var) > 1], 2))
@@ -300,10 +329,17 @@ getMoreVEPinfo = function(variants, plotDirectory) {
       AAbeforeRet = rep('', length(unique(ID)))
       AAafterRet = rep('', length(unique(ID)))
       domainRet = rep('', length(unique(ID)))
+      cosmicRet = rep('', length(unique(ID)))
+      isCosmicCensusRet = rep(F, length(unique(ID)))
+      cosmicVariantDensityRet = rep(0, length(unique(ID)))
+      cosmicGeneDensityRet = rep(0, length(unique(ID)))
       for ( i in 1:nrow(VEPdata) ) {
-        sevI = sev[i] - numericPolyPhen[i]
+        sevI = sev[i]
         IDI = ID[i]
-        if ( sevI < sevScore[IDI] ) {
+        if ( sevI - numericPolyPhen[i] < sevScore[IDI] ) {
+          sevScore[IDI] = sevI - numericPolyPhen[i]
+          mostSev[IDI] = severityToType(sevI)
+
           polyPhenRet[IDI] = polyPhen[i]
           exonRet[IDI] = exon[i]
           siftRet[IDI] = sift[i]
@@ -311,10 +347,16 @@ getMoreVEPinfo = function(variants, plotDirectory) {
           AAbeforeRet[IDI] = AAbefore[i]
           AAafterRet[IDI] = AAafter[i]
           domainRet[IDI] = domain[i]
+          cosmicRet[IDI] = cosmic[i]
+          isCosmicCensusRet[IDI] = isCosmicCensus[i]
+          cosmicVariantDensityRet[IDI] = cosmicVariantDensity[i]
+          cosmicGeneDensityRet[IDI] = cosmicGeneDensity[i]
         }
       }
       
       #add effect and severity to q
+      variants$variants[[name]]$severity = rep(100, nrow(variants$variants[[name]]))
+      variants$variants[[name]]$type = rep('unknown', nrow(variants$variants[[name]]))
       variants$variants[[name]]$polyPhen = rep('', nrow(variants$variants[[name]]))
       variants$variants[[name]]$sift = rep('', nrow(variants$variants[[name]]))
       variants$variants[[name]]$exon = rep('', nrow(variants$variants[[name]]))
@@ -322,7 +364,13 @@ getMoreVEPinfo = function(variants, plotDirectory) {
       variants$variants[[name]]$AAbefore = rep('', nrow(variants$variants[[name]]))
       variants$variants[[name]]$AAafter = rep('', nrow(variants$variants[[name]]))
       variants$variants[[name]]$domain = rep('', nrow(variants$variants[[name]]))
+      variants$variants[[name]]$cosmic = rep('', nrow(variants$variants[[name]]))
+      variants$variants[[name]]$isCosmicCensus = rep(F, nrow(variants$variants[[name]]))
+      variants$variants[[name]]$cosmicVariantMPM = rep(0, nrow(variants$variants[[name]]))
+      variants$variants[[name]]$cosmicGeneMPMPB = rep(0, nrow(variants$variants[[name]]))
       
+      variants$variants[[name]][qNames,]$severity = sevScore
+      variants$variants[[name]][qNames,]$type = mostSev
       variants$variants[[name]][qNames,]$polyPhen = polyPhenRet
       variants$variants[[name]][qNames,]$sift = siftRet
       variants$variants[[name]][qNames,]$exon = exonRet
@@ -330,9 +378,70 @@ getMoreVEPinfo = function(variants, plotDirectory) {
       variants$variants[[name]][qNames,]$AAbefore = AAbeforeRet
       variants$variants[[name]][qNames,]$AAafter = AAafterRet
       variants$variants[[name]][qNames,]$domain = domainRet
+      variants$variants[[name]][qNames,]$cosmic = cosmicRet
+      variants$variants[[name]][qNames,]$isCosmicCensus = isCosmicCensusRet
+      variants$variants[[name]][qNames,]$cosmicVariantMPM = cosmicVariantDensityRet
+      variants$variants[[name]][qNames,]$cosmicGeneMPMPB = cosmicGeneDensityRet
       catLog(length(mostSev), 'VEPed variants.\n')
     }
   }
   catLog('done.\n')
   return(variants)
+}
+
+#' internal function
+#'
+#' @details Just remembers which columns are added by getMoreVEPinfo
+moreVEPnames = function() c('polyPhen', 'sift', 'exon', 'AApos', 'AAbefore', 'AAafter', 'domain', 'cosmic', 'isCosmicCensus', 'cosmicVariantMPM', 'cosmicGeneMPMPB')
+
+
+
+#' Retrieves information about cosmic variant IDs
+#'
+#' @param cosmic character: The cosmic IDs.
+#' @param cosmicDirectory character: The directory where the cosmic files CosmicMutantExportCensus.tsv and CosmicMutantExport.tsv are located.
+#' @param onlyCensus logical: Restrict to cosmic census genes.
+#'
+#' @details For each cosmic ID, return whether it is seen in a census gene, and the mutations per million tumors (MPM) for that variant, as well as the average MPM over the gene (mutations per million tumors per basepair, MPMPB).
+getCosmicCounts = function(cosmic, cosmicDirectory='/wehisan/general/academic/grp_leukemia_genomics/data/resources/COSMIC', onlyCensus=T) {
+  if ( cosmicDirectory == '' ) {
+    warning('COSMIC directory not specified. To access more cosmic data, download CosmicMutantExportCensus.tsv and CosmicMutantExport.tsv from cosmic, put them in a directory (dont change the names of the files please), and provide the directory to postAnalyseVEP, getMoreVEPinfo or getCosmicCounts.')
+    return(list(cosmic=cosmic, found=rep(NA, length(cosmic)),
+                variantDensity=rep(NA, length(cosmic)), geneDensity=rep(NA, length(cosmic))))
+  }
+  
+  if ( onlyCensus ) countsFile = paste0(cosmicDirectory, '/cosmicCounts.Rdata')
+  else countsFile = paste0(cosmicDirectory, '/allCosmicCounts.Rdata')
+  if ( file.exists(countsFile) ) load(countsFile)
+  else {
+    if ( onlyCensus ) cosmicVariantsFile = paste0(cosmicDirectory, '/CosmicMutantExportCensus.tsv')
+    else cosmicVariantsFile = paste0(cosmicDirectory, '/CosmicMutantExport.tsv')
+    if ( !file.exists(cosmicVariantsFile) ) {
+      warning(paste0('couldnt find cosmics file at ', cosmicVariantsFile,'. Will return 0 counts for all variants.'))
+    return(list(cosmic=cosmic, found=rep(NA, length(cosmic)),
+                variantDensity=rep(NA, length(cosmic)), geneDensity=rep(NA, length(cosmic))))
+    }
+    cosmicData = read.table(cosmicVariantsFile, fill=T, sep='\t', header=T)
+    variantCounts = table(cosmicData$Mutation.ID)
+    geneCounts = table(cosmicData$Gene.name)
+    geneLengths = aggregate(Gene.CDS.length ~ Gene.name, cosmicData, FUN=max)
+    variantGene = aggregate(Gene.name ~ Mutation.ID, cosmicData, FUN=function(genes) genes[1])
+    rownames(variantGene) = variantGene[,1]
+    nTumors = length(unique(cosmicData$ID_tumour))
+    geneDensity = geneCounts/geneLengths[,2]/nTumors*1e6
+    variantDensity = variantCounts/nTumors*1e6
+
+    cosmicCounts = list(geneCounts=geneCounts, geneLengths=geneLengths, nTumors=nTumors,
+                        geneDensity=geneDensity, variantDensity=variantDensity, variantGene=variantGene)
+    save(cosmicCounts, file=countsFile)
+  }
+
+  #count times the specific variant and gene is hit.
+  found = cosmic %in% names(cosmicCounts$variantDensity)
+  variantDensity = rep(0, length(cosmic))
+  variantDensity[found] = cosmicCounts$variantDensity[cosmic[found]]
+  geneDensity = rep(0, length(cosmic))
+  geneDensity[found] = cosmicCounts$geneDensity[cosmicCounts$variantGene[cosmic[found],2]]
+
+  return(list(cosmic=cosmic, found=found, variantDensity=variantDensity, geneDensity=geneDensity))
 }

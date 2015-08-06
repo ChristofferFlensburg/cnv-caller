@@ -26,7 +26,7 @@ vcfFiles = normalizePath(list.files('../vcf', pattern='*.vcf$', full.names=T))
 # So a tab separated chr start end gene. Use unpadded regions.
 # The gene names will appear in plots and output, so you may want these
 #   in a human readable format.
-captureRegionsFile = normalizePath('../captureRegions/captureRegions.gc.bed')
+captureRegionsFile = normalizePath('../captureRegions/captureRegions.bed')
 
 #db SNP directory. hg19 can be downloaded from https://www.dropbox.com/s/nst57cbvcy9lcgg/hg19_dbSNP.zip?dl=0
 #they can also be generated using the script at URL.
@@ -88,4 +88,4 @@ data = analyse(inputFiles, outputDirectories, settings, forceRedo, runtimeSettin
 #Run the VEP afterburned to annotate variants.
 #Remakes some of the plots and output, adding annotation.
 #VEP must be callable from the terminal with the command vep.
-postAnalyseVEP(Rdirectory, plotDirectory, parameters)
+postAnalyseVEP(Rdirectory, plotDirectory, parameters, cosmicDir='../COSMIC')

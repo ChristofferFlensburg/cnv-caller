@@ -52,7 +52,11 @@ outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, run
         dbMAF=if ( 'dbMAF' %in% names(q) ) q$dbMAF else rep('na', nrow(q)),
         dbValidated=if ( 'dbValidated' %in% names(q) ) q$dbValidated else rep('na', nrow(q)),
         row.names=rownames(q))
-      if ( 'severity' %in% names(q) ) ord = order(q$severity + 10*q$germline)
+      if ( all(moreVEPnames() %in% names(q)) ) {
+        catLog('adding more VEP info..')
+        somatic = cbind(somatic, q[,moreVEPnames()])
+      }
+      if ( 'severity' %in% names(q) )  ord = order(q$severity + 10*ifelse(is.na(q$germline), 0, q$germline))
       else ord = order(10*q$germline)
       somatic = somatic[ord,]
       somatics[[sample]] = somatic

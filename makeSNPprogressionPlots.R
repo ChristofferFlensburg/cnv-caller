@@ -11,11 +11,13 @@ makeSNPprogressionPlots = function(variants, timeSeries, normals, plotDirectory,
     outfile = paste0(msDirectory, '/', names(timeSeries)[i], '.pdf')
     excelFileDB = paste0(msDirectory, '/', names(timeSeries)[i], '_DB.xls')
     excelFileNotDB = paste0(msDirectory, '/', names(timeSeries)[i], '_NotDB.xls')
+    excelFileAllChanging = paste0(msDirectory, '/', names(timeSeries)[i], '_allSevere.xls')
     if ( !file.exists(outfile) | forceRedo ) {
-      catLog('Plotting SNP progression to ', outfile, '..', sep='')
-      pdf(outfile, width = 15, height=10, compress=T)
-      qualityProgression(variants$variants[ts], variants$SNPs, normals[ts], nondb=F, excelFile=excelFileDB, main='dbSNPs only')
-      qualityProgression(variants$variants[ts], variants$SNPs, normals[ts], db=F, excelFile=excelFileNotDB, main='non-dbSNPs only')
+      catLog('Plotting SNP progression to ', outfile, '...\n', sep='')
+      pdf(outfile, width = 15, height=10)
+      qualityProgression(variants$variants[ts], variants$SNPs, normals[ts], nondb=F, excelFile=excelFileDB, main='significantly changing germline SNPs')
+      qualityProgression(variants$variants[ts], variants$SNPs, normals[ts], db=F, excelFile=excelFileNotDB, main='significantly changing somatic SNVs')
+      qualityProgression(variants$variants[ts], variants$SNPs, normals[ts], db=F, excelFile=excelFileAllChanging, main='all protein changing somatic SNVs', filterConstant=F)
       dev.off()
       catLog('done.\n')
     }
@@ -24,7 +26,11 @@ makeSNPprogressionPlots = function(variants, timeSeries, normals, plotDirectory,
 
 
 #helper function that does all the work for the frequency progression plots.
-qualityProgression = function(qs, SNPs, normal, db=T, nondb=T, excelFile='', main='') {
+qualityProgression = function(qs, SNPs, normal, db=T, nondb=T, excelFile='', main='', filterConstant=T) {
+  if ( !filterConstant  && !(('severity' %in% names(qs[[1]])) && !any(is.na(qs[[1]]$severity))) ) {
+    catLog('Skipping unfiltered snp progression without VEP information.\n')
+    return()
+  }
   catLog('Finding common variants..')
   if ( !('somaticP' %in% names(qs[[1]])) ) {
     warning('no somaticQ in qs of quality progression plot. not plotting.')
@@ -35,7 +41,7 @@ qualityProgression = function(qs, SNPs, normal, db=T, nondb=T, excelFile='', mai
     return()
   }
   if ( !nondb ) use = lapply(qs, function(q) q$db & q$somaticP <= 0.1 & q$var > 0)
-  if ( !db ) use = lapply(qs, function(q) !q$db | q$somaticP > 0.1 & q$var > 0)
+  if ( !db ) use = lapply(qs, function(q) q$somaticP > 0.1 & q$var > q$cov*0.1 & q$flag=='')
   use = apply(do.call(cbind, use), 1, any)
   if ( sum(use) == 0 ) return()
   qs = lapply(qs, function(q) q[use,] )
@@ -53,23 +59,29 @@ qualityProgression = function(qs, SNPs, normal, db=T, nondb=T, excelFile='', mai
   colnames(fs) = names(qs)
   cov = do.call(cbind, lapply(qs, function(q) q$cov))
   var = do.call(cbind, lapply(qs, function(q) q$var))
-  flag = do.call(cbind, lapply(qs, function(q) q$flag))
   f = rowSums(var)/rowSums(cov)
   fs[is.na(fs)] = -0.02
-  catLog('p-values..')
-  ps = matrix(pBinom(as.integer(cov), as.integer(var), rep(f, ncol(cov))), ncol=ncol(cov))
-  p = apply(ps, 1, fisherTest)[2,]
+
+  if ( filterConstant ) {
+    catLog('p-values..')
+    ps = matrix(pBinom(as.integer(cov), as.integer(var), rep(f, ncol(cov))), ncol=ncol(cov))
+    p = apply(ps, 1, fisherTest)[2,]
+  }
+  else {
+    severity = do.call(cbind, lapply(qs, function(q) q$severity))
+    severity = apply(severity, 1, min)
+    p = ifelse(severity <= 11, 0, 1)
+  }
 
   SNPs = SNPs[SNPs$x %in% qs[[1]]$x,]
   gene = paste0(gsub('.+:', '', SNPs[as.character(qs[[1]]$x),]$inGene), ' (', SNPs[as.character(qs[[1]]$x),]$chr, ')')
   if ( db ) gene = SNPs[as.character(qs[[1]]$x),]$chr
   
   catLog('colours..')
-  clean = rowSums(matrix(flag %in% c('', 'Svr'), ncol=ncol(flag))) == ncol(flag)
-  dof = max(20, sum(clean & rowSums(fs) > 0 & rowSums(fs) < ncol(fs)))
+  dof = max(20, sum(rowSums(fs) > 0 & rowSums(fs) < ncol(fs)))
   importance = pmin(1, noneg(-log10(p)/log10(dof) - 0.75))
   weight = pmin(1, pmax(importance, sqrt(rowMeans(cov/300))))
-  doColour = importance > 0.5 & clean
+  doColour = importance > 0.5
   recurringGenes = gene[doColour][duplicated(gene[doColour])]
   isRecurringGene = gene %in% recurringGenes & doColour
   hue = rep(0, length(doColour))
@@ -80,23 +92,14 @@ qualityProgression = function(qs, SNPs, normal, db=T, nondb=T, excelFile='', mai
   if ( sum(doColour) > 1 ) {
     catLog('plotting heatmap..')
     rGcol = unique(D3colours(rep(1, sum(isRecurringGene)), rep(1, sum(isRecurringGene)), hue[isRecurringGene]))
-    rGcolFlag = unique(D3colours(rep(0.4, sum(isRecurringGene)), rep(0.3, sum(isRecurringGene)), hue[isRecurringGene]))
     rG = unique(gene[isRecurringGene])
-    names(rGcol) = names(rGcolFlag) = rG
+    names(rGcol) = rG
     Rowv = NULL
     if ( sum(doColour) > 1000 ) Rowv = NA
-    RSC = ifelse(gene[doColour] %in% rG, ifelse(clean[doColour],
-                rGcol[gene[doColour]], rGcolFlag[gene[doColour]]),
-      ifelse(clean[doColour], rgb(0.65, 0.65, 0.65),'grey'))
+    RSC = ifelse(gene[doColour] %in% rG, rGcol[gene[doColour]], 'grey')
     clusterOrder =
-      heatmap(fs[doColour,,drop=F], cexCol=1, labRow=gene[doColour], Rowv=Rowv,
-              RowSideColors = RSC, col=sapply((0:100)/100, function(heat) D3colours(1, heat, heat)), margins=c(8,15),
-              scale='none', main=main)
-    colorbar.plot(par('usr')[1]*0.9+par('usr')[2]*0.1, par('usr')[3]*0.5+par('usr')[4]*0.5,
-                  strip.width = 0.05, strip.length = 0.4, 0:1000,
-                  col=sapply((0:1000)/1000, function(heat) D3colours(1, heat, heat)), margins=c(10,5), horizontal=F)
-    segments(par('usr')[1]*0.93+par('usr')[2]*0.07, par('usr')[3]*0.5+par('usr')[4]*0.5,
-             par('usr')[1]*0.925+par('usr')[2]*0.075, par('usr')[3]*0.5+par('usr')[4]*0.5, lwd=2, D3colour(c(1,0.5,0.5)))
+      makeHeatmap(fs[doColour,,drop=F], cexCol=1, labRow=gene[doColour], Rowv=Rowv,
+                  RowSideColors = RSC, margins=c(8,15), main=main, , label='frequency')
     if ( length(rG) > 0 ) {
       legend('right', rG, col = rGcol, lwd=10, bg='white')
     }

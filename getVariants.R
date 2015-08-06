@@ -263,7 +263,13 @@ getQuality = function(file, chr, pos, BQoffset, cpus=1) {
   which = GRanges(chr, IRanges(pos-3, pos+3))
   p1 = ScanBamParam(which=which, what=c('pos', 'seq', 'cigar', 'qual', 'mapq', 'strand'),
     flag=scanBamFlag(isSecondaryAlignment=FALSE))
-  regionReads = scanBam(file, param=p1)
+  index = paste0(file, '.bai')
+  if ( !file.exists(index) ) {
+    index = gsub('.bam$', '.bai', file)
+    if ( !file.exists(index) )
+      stop(paste('Could not find an index file for', file, '\nI want either', paste0(file, '.bai'), 'or', index))
+  }
+  regionReads = scanBam(file, index=index, param=p1)
   before = sum(sapply(regionReads, function(reads) length(reads$mapq)))
   regionReads = lapply(regionReads, function(reads) {
     keep = reads$mapq > 0 & !is.na(reads$mapq)
@@ -651,6 +657,9 @@ shareVariants = function(variants) {
       newQ = newQ[as.character(x),]
       newQ$var = 0
       newQ$flag = ''
+      if ( 'type' %in% names(newQ) ) newQ$type = 'notChecked'
+      if ( 'severity' %in% names(newQ) ) newQ$severity = 100
+      if ( 'somaticP' %in% names(newQ) ) newQ$somaticP = 0
       rownames(newQ) = new
       newQ$variant = gsub('^[0-9]+', '', new)
       q = rbind(q, newQ)

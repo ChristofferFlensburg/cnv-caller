@@ -86,6 +86,14 @@ newVariants = function(q1, q2, SNPs, genome, cpus=1, ps=NA) {
     dbSNP=ifelse(q1$db[toReturn], 'YES', ''),
     germlineLike=ifelse(is.na(q1$germline[toReturn]), 'na', ifelse(q1$germline[toReturn], 'YES', '')),
     row.names=rownames(q1)[toReturn])
+
+  if ( all(moreVEPnames() %in% names(q2)) ) {
+    catLog('Adding more VEP info..')
+    ret = cbind(ret, q2[toReturn,moreVEPnames()])
+    catLog('done.\n')
+  }
+
+  
   if ( 'severity' %in% names(q1) ) ord = order(q1$severity[toReturn] + 10*q1$germline[toReturn])
   else ord = order(10*q1$germline[toReturn])
   ret = ret[ord,]

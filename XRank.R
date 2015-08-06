@@ -821,7 +821,8 @@ XRank = function(fit, coefs = 0, keepPosterior = T, verbose=F, plot=F, cpus=5) {
   posts = posteriors(fit, coefs = coefs, quiet= !verbose, plot=plot, cpus=cpus, prior='empirical')
   ranks = postRank(posts, quiet = !verbose, cpus=cpus)
 
-  if ( keepPosterior ) fit$posterior = posts$data
+  if ( !keepPosterior ) fitSmall = fit
+  fit$posterior = posts$data
   fit$prior = posts$prior
   fit$XRank = as.matrix(ranks$XRank)
   fit = bestGuess(fit, coefs = coefs, quiet = !verbose, cpus=cpus)
@@ -837,6 +838,12 @@ XRank = function(fit, coefs = 0, keepPosterior = T, verbose=F, plot=F, cpus=5) {
     layout(1)
   }
 
+  if ( !keepPosterior ) {
+    fitSmall$prior = fit$prior
+    fitSmall$XRank = fit$XRank
+    fitSmall$best.guess = fit$best.guess
+    fit = fitSmall
+  }
   return(fit)
 }
 

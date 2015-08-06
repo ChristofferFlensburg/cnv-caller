@@ -42,8 +42,6 @@ callCNVs = function(variants, normalVariants, fitS, SNPs, names, individuals, no
                                   genome=genome, cpus=cpus))
   })
 
-  #cleanClusters = cancelLFCnoise(clusters, individuals)
-
   names(clusters) = names
   save(clusters, file=clustersSaveFile)
   return(clusters)
@@ -1011,13 +1009,13 @@ boostCRwidth = function(CR, plot=F) {
 }
 
 
-#plotting function for diagnostic plot of calls. Good for spotting failed average CNV.
+#plotting function for diagnostic plot of calls. Good for spotting failed average CNV, or dubious calls in general.
 plotMAFLFC = function(clusters, xlim=c(-1.2, 1.2)) {
   plot(0, type='n', xlim=xlim, ylim=c(0, 0.5), xlab='LFC', ylab='MAF')
   clonalities = (0:500)/500
   for ( call in allCalls()[c(1:8, 11:12)] ) {
     fMs = callCloneTofM(call, clonalities)
-    points(fMs[,2], fMs[,1], pch=16, cex=2*clonalities, col=callToCol(call))
+    points(fMs[,2], fMs[,1], pch=16, cex=2*clonalities, col=callsToCol(call))
     text(fMs[round(length(clonalities)*0.6),2]+0.05, fMs[round(length(clonalities)*0.6),1]+0.01, call, col=callsToCol(call))
   }
   w = sqrt(clusters$width^2 + systematicVariance()^2)

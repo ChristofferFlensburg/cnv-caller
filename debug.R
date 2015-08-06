@@ -1,9 +1,8 @@
 
-
-#These are debugging functions, and other methods to handle errors and problems in general
-
-
-
+#' internal function for debugging purposes.
+#'
+#' @details This function saves the input to a function in a directory, so that the exact input triggering the bug
+#'          can be examined.
 dumpInput = function(Rdirectory, inputList) {
   catLog('Dumping input for debugging purposes..')
   debugDir = paste0(Rdirectory, '/debug')

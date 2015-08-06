@@ -110,8 +110,6 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, normals, Rdire
         SNVs = story$germlineVariants[grep('^[0-9]', story$germlineVariants)]
         if ( length(SNVs) > 0 ) {
           samples = timeSeries[[ind]]
-          print(length(SNVs))
-          print(samples)
           variants$variants[samples] = lapply(variants$variants[samples], function(q) {
             q$germline = rownames(q) %in% SNVs
             return(q)
@@ -150,7 +148,7 @@ findSNPstories = function(somaticQs, cnvs, normal, filter=T) {
   colnames(ret$stories) = colnames(ret$errors) = names(somaticQs)
   if ( !filter ) return(ret)
   
-  allSmall = rowSums(is.na(ret$errors) | ret$stories - ret$errors*1.5 < 0.2 | ret$errors > 0.2) == ncol(ret$stories)
+  allSmall = rowSums(is.na(ret$errors) | ret$stories - ret$errors*2 < 0 | ret$errors > 0.2) == ncol(ret$stories)
   ret = ret[!allSmall,,drop=F]
   uncertain = rowMeans(ret$errors) > 0.2
   ret = ret[!uncertain,,drop=F]
@@ -411,7 +409,7 @@ cnvsToStories = function(cnvs, events, normal, filter=T) {
 
   if ( !filter ) return(ret)
   
-  allSmall = rowSums(ret$stories - ret$errors*1.5 < 0.2 | ret$errors > 0.2) == ncol(ret$stories)
+  allSmall = rowSums(ret$stories - ret$errors*1.5 < 0.15 | ret$errors > 0.2) == ncol(ret$stories)
   ret = ret[!allSmall,,drop=F]
   uncertain = rowMeans(ret$errors) > 0.2
   ret = ret[!uncertain,,drop=F]
@@ -585,6 +583,7 @@ pairScore = function(stories, is, js) {
 
   err = stories$errors[c(is,js),]
   if ( any(err<=0) ) err[err<=0] = rep(min(c(1,err[err>0]))/1e6, sum(err<=0))
+  if ( any(is.infinite(err)) ) err[is.infinite(err)] = rep(1e6, sum(is.infinite(err)))
   st = stories$stories[c(is,js),]
   w = t(1/t(err^2)/colsums(1/err^2))
   mean = colSums(st*w)

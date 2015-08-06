@@ -137,6 +137,10 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
   red = pmin(1, pmax(0, (-log10(ps)/log10(dof) - redCut)))
 
   use = q1$cov >= minCov & q2$cov >= minCov
+  if ( any(is.na(use)) ) {
+    warning(paste0(sum(is.na(use)), ' NA entries in use'))
+    use = use & !is.na(use)
+  }
   if ( sum(use) == 0 ) invisible(ps)
   cleanOrder = which(clean&use)[order((red-0.1*db)[clean&use])]
   col = rep('black', length(red))
@@ -153,9 +157,9 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
   if ( !plotPosition ) {
     if ( legend & !add ) {
       if ( plotFlagged )
-        legend('bottomright', c('clean non-db', 'flagged non-db', 'clean germline-like non-db', 'clean db', 'flagged db', 'significantly different', 'high coverage', 'low coverage', 'severe effect'), pch=c(19, 1, 3, 4, 4, 19, 19, 19, 1), col=c('blue', 'grey', 'blue', 'black', 'grey', 'red', 'black', 'black', 'orange'), pt.cex=c(1,1,1,1,1,1,1,0.3, 1.5), bg='white')
+        legend('bottomright', c('clean non-db', 'flagged non-db', 'clean germline-like non-db', 'clean db', 'flagged db', 'significantly different', 'high coverage', 'low coverage', 'severe effect', 'COSMIC Census Variant'), pch=c(19, 1, 3, 4, 4, 19, 19, 19, 1, 1), col=c('blue', 'grey', 'blue', 'black', 'grey', 'red', 'black', 'black', 'orange', 'green'), pt.cex=c(1,1,1,1,1,1,1,0.3, 1.5, 2), pt.lwd=c(1,1,1,1,1,1,1,1, 2, 4), bg='white')
       else
-        legend('bottomright', c('not in dbSNP', 'in dbSNP', 'germline-like non-db', 'significantly different', 'low coverage', 'severe effect'), pch=c(19, 4, 3, 19, 19, 1), col=c('blue', 'black', 'blue', 'red', 'black', 'orange'), pt.cex=c(1,1,1,1,0.3, 1.5), bg='white')
+        legend('bottomright', c('not in dbSNP', 'in dbSNP', 'germline-like non-db', 'significantly different', 'low coverage', 'severe effect', 'COSMIC Census Variant'), pch=c(19, 4, 3, 19, 19, 1, 1), col=c('blue', 'black', 'blue', 'red', 'black', 'orange', 'green'), pt.cex=c(1,1,1,1,0.3, 1.5, 2), pt.lwd=c(1,1,1,1,1, 2, 4), bg='white')
     }
     points(freq1[!clean&use], freq2[!clean&use], cex=cex[!clean&use],
            lwd=pmin(maxCex, sqrt(sqrt(q1$cov*q2$cov)[!clean&use]/covScale)), pch=pch[!clean&use], col=col[!clean&use])
@@ -166,8 +170,13 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
   if ( 'severity' %in% names(q1) & 'severity' %in% names(q2) ) {
     severity = pmin(q1$severity, q2$severity)
     severe = clean & use & severity <= 11 & !db
-    points(freq1[severe], freq2[severe], cex=cex[severe]+(8-severity[severe])/10,
-           lwd=(8-severity[severe])/2, pch=1, col='orange')
+    points(freq1[severe], freq2[severe], cex=cex[severe]+(12-severity[severe])/10,
+           lwd=(12-severity[severe])/2, pch=1, col='orange')
+    if ( 'isCosmicCensus' %in% names(q1) & 'isCosmicCensus' %in% names(q2) ) {
+      isCosmic = (q1$isCosmicCensus | q2$isCosmicCensus) & severe
+      points(freq1[isCosmic], freq2[isCosmic], cex=cex[isCosmic]+(12-severity[isCosmic])/10+1,
+             lwd=3, pch=1, col='green')
+    }
   }
   
   if ( plotPosition ) {
@@ -192,6 +201,14 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
 
   if ( print ) {
     toPrint = red > printRedCut
+    if ( 'severity' %in% names(q1) & 'severity' %in% names(q2) ) {
+      severity = pmin(q1$severity, q2$severity)
+      severe = clean & use & severity <= 11 & !db
+      if ( 'isCosmicCensus' %in% names(q1) & 'isCosmicCensus' %in% names(q2) ) {
+        isCosmic = (q1$isCosmicCensus | q2$isCosmicCensus) & severe
+        toPrint = toPrint | isCosmic
+      }
+    }
     if ( length(GoI) > 0 )
       toPrint = toPrint | SNPs$inGene %in% GoI
     if ( printOnlyNovel ) toPrint = toPrint & freq1 < 0.1 & freq2 > 0.2
