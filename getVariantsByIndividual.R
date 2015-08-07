@@ -745,7 +745,7 @@ getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, 
     cov = normalVariantsBI$variants[[sample]]$cov[use] + 0.2 + noneg(rnorm(sum(use), 0, 0.2)-0.2)
     var = normalVariantsBI$variants[[sample]]$var[use] + 0.2 + noneg(rnorm(sum(use), 0, 0.2)-0.2)
     png(paste0(FreqDirectory, sample, '-varcov.png'), height=10, width=20, res=144, unit='in')
-    plotColourScatter((pmin(1,var/cov), cov, log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
+    plotColourScatter(pmin(1,var/cov), cov, log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
     dev.off()
     
     use = normalVariantsBI$variants[[sample]]$var > 0
