@@ -265,8 +265,8 @@ selectGermlineHetsFromCancer = function(cancerVariants, moreNormalVariants, sex,
 
   #Restrict to validated dbSNPs with population frequency > 1%
   catLog('Restrict to validated dbSNPs with population frequency > 1%...')
-  isValidated = cancerVariants$dbValidated
-  isFrequent = cancerVariants$dbMAF > 0.01
+  isValidated = cancerVariants$dbValidated & !is.na(cancerVariants$dbValidated)
+  isFrequent = cancerVariants$dbMAF > 0.01 & !is.na(cancerVariants$dbMAF)
   use = use[isValidated & isFrequent]
   cancerVariants = cancerVariants[use,]
   catLog('done! Got', sum(isValidated & isFrequent), 'variants.\n')
