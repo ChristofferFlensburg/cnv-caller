@@ -151,13 +151,14 @@ vcfToPositions = function(files, genome='hg19') {
   catLog('done.\nProcessing data...')
   if ( nrow(raw) == 0 ) return(matrix(1, nrow=0, ncol=22))
   chrs = gsub('MT', 'M', gsub('chr', '', as.character(raw$V1)))
-  variant = sapply(strsplit(raw$V5, split=','), function(parts) c(parts, '')[1])
+  use = chrs %in% names(chrLengths(genome))
+  variant = sapply(strsplit(raw$V5[use], split=','), function(parts) c(parts, '')[1])
   ret = data.frame(
-    chr = chrs,
-    start = as.numeric(as.character(raw$V2)),
-    end = as.numeric(as.character(raw$V2)),
-    x = chrToX(chrs, as.numeric(as.character(raw$V2)), genome=genome),
-    reference = raw$V4,
+    chr = chrs[use],
+    start = as.numeric(as.character(raw$V2[use])),
+    end = as.numeric(as.character(raw$V2[use])),
+    x = chrToX(chrs[use], as.numeric(as.character(raw$V2[use])), genome=genome),
+    reference = raw$V4[use],
     variant = variant, stringsAsFactors=F)
   
   ret = ret[!duplicated(ret$x),]
