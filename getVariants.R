@@ -685,7 +685,7 @@ inGene = function(SNPs, genes, noHit = NA, genome='hg19') {
 
 #Takes the sample variants and normal bam files and capture regions.
 #return the variant information for the normals on the positions that the samples are called on.
-getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, BQoffset, normalRdirectory, Rdirectory, plotDirectory, cpus, forceRedoSNPs=F, forceRedoVariants=F) {
+getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, BQoffset, dbDir, normalRdirectory, Rdirectory, plotDirectory, cpus, forceRedoSNPs=F, forceRedoVariants=F) {
   SNPs = variants$SNPs
 
   variantsSaveFile = paste0(Rdirectory, '/normalVariants.Rdata')

@@ -135,8 +135,10 @@ nameCaptureRegions = function(inFile, outFile, Rdirectory, genome='hg19') {
   use = chr %in% names(chrLengths(genome))
   if ( sum(!use) > 10 ) warning(paste0(sum(!use), ' rows in the capture region file does not match a chromosome in the genome ', genome, 'will use the remaining ', sum(use), 'rows.'))
   if ( sum(use) == 0 ) stop('No rows in the capture regions start with a chromosome name. Aborting, sorry.')
-
-  x = chrToX(chr[use], (start+end)[use]/2, genome=genome)
+  chr = as.character(chr[use])
+  start = as.numeric(start[use])
+  end = as.numeric(end[use])
+  x = chrToX(chr, (start+end)/2, genome=genome)
   gene = xToGene(x, genome=genome, saveDir=Rdirectory)
 
   outDF = data.frame(chr, start, end, gene)
