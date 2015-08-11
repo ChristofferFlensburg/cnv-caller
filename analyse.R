@@ -347,7 +347,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   }
   bamIndexFiles = paste0(bamFiles, '.bai')
   bamIndexFiles2 = gsub('.bam$', '.bai', bamFiles)
-  if ( any(!(file.exists(bamIndexFiles) | file.exists(bamIndexFiles2)) ) {
+  if ( any(!(file.exists(bamIndexFiles) | file.exists(bamIndexFiles2))) ) {
     missingIndex = !(file.exists(bamIndexFiles) | file.exists(bamIndexFiles2))
     catLog('Could not find bam index files for:' , bamFiles[missingIndex], ', aborting.\n')
     stop('Could not find bam index files for:' , bamFiles[missingIndex], ', aborting.\n')
