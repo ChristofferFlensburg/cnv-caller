@@ -206,11 +206,11 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   catLog('\nParameters for this run are:\n')
   if ( 'maxCov' %in% names(parameters) &  class(parameters$maxCov) != 'numeric' ) stop('parameter maxCov needs to be numeric.')
     if ( 'maxCov' %in% names(parameters) )   assign('.maxCov', parameters$maxCov, envir = .GlobalEnv)
-  else assign('.maxCov', 100, envir = .GlobalEnv)
+  else assign('.maxCov', 150, envir = .GlobalEnv)
   catLog('   maxCov:              ', get('.maxCov', envir = .GlobalEnv), '\n', sep='')
   if ( 'systematicVariance' %in% names(parameters) &  class(parameters$systematicVariance) != 'numeric' ) stop('parameter systematicVariance needs to be numeric.')
   if ( 'systematicVariance' %in% names(parameters) ) assign('.systematicVariance', parameters$systematicVariance, envir = .GlobalEnv)
-  else assign('.systematicVariance', 0.02, envir = .GlobalEnv)
+  else assign('.systematicVariance', 0.03, envir = .GlobalEnv)
   catLog('   systematicVariance:  ', get('.systematicVariance', envir = .GlobalEnv), '\n', sep='')
   catLog('\n')
 
@@ -346,9 +346,11 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
     stop('Missing (or misnamed) bam files:' , bamFiles[!file.exists(bamFiles)], ', aborting.\n')
   }
   bamIndexFiles = paste0(bamFiles, '.bai')
-  if ( any(!file.exists(bamIndexFiles)) ) {
-    catLog('Missing (or misnamed) bam index files:' , bamIndexFiles[!file.exists(bamIndexFiles)], ', aborting.\n')
-    stop('Missing (or misnamed) bam index files:' , bamIndexFiles[!file.exists(bamIndexFiles)], ', aborting.\n')
+  bamIndexFiles2 = gsub('.bam$', '.bai', bamFiles)
+  if ( any(!(file.exists(bamIndexFiles) | file.exists(bamIndexFiles2)) ) {
+    missingIndex = !(file.exists(bamIndexFiles) | file.exists(bamIndexFiles2))
+    catLog('Could not find bam index files for:' , bamFiles[missingIndex], ', aborting.\n')
+    stop('Could not find bam index files for:' , bamFiles[missingIndex], ', aborting.\n')
   }
   
   catLog('##################################################################################################\n\n',
@@ -670,6 +672,15 @@ loadMethods = function(stringsAsFactors = FALSE, byIndividual=F) {
   source('makeSummaryPlot.R')
   source('getStories.R')
   source('makeRiverPlots.R')
+
+  if ( !exists('.maxCov', envir = .GlobalEnv) ) {
+    catLog('Setting maxCov to default 150.\n')
+    assign('.maxCov', 150, envir = .GlobalEnv)
+  }
+  if ( !exists('.systematicVariance', envir = .GlobalEnv) ) {
+    catLog('Setting systematicVariance to default 0.03.\n')
+    assign('.systematicVariance', 0.03, envir = .GlobalEnv)
+  }
 }
 
 #' returns input that uses saved data if present.
