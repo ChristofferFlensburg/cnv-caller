@@ -400,8 +400,10 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   #remove Y counts if no normal sample is male.
   if ( !any(sex[group=='normal'] == 'male') & length(yes) > 0 ) {
     counts = counts[-yes,]
-    xes = grep('X$', annotation$Chr[-yes])
-    yes = grep('Y$', annotation$Chr[-yes])
+    countsOri = countsOri[-yes,]
+    annotation = annotation[-yes,]
+    xes = grep('X$', annotation$Chr)
+    yes = grep('Y$', annotation$Chr)
   }
 
   #merge exon counts to gene counts
@@ -411,7 +413,7 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   geneCounts = aggregate(x = counts, list(rownames(counts)), FUN = 'sum')
   rownames(geneCounts) = geneCounts[,1]
   geneCounts = geneCounts[,-1]
-
+  
   x = annotationToX(annotation, genome=genome)
   geneX = aggregate(x, list(rownames(counts)), FUN='min')[,2]
   geneOrder = order(geneX)
@@ -420,7 +422,6 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   geneCounts = geneCounts[geneOrder,]
   geneXes = which(aggregate(grepl('^X', annotation$Chr), list(rownames(counts)), FUN = 'any')[geneOrder,2])
   geneYes = which(aggregate(grepl('^Y', annotation$Chr), list(rownames(counts)), FUN = 'any')[geneOrder,2])
- 
 
   catLog('Running voom on exons..')
   png(paste0(diagnosticPlotsDirectory, '/voomVariance.exon.png'), height=10, width=20, res=144, unit='in')
