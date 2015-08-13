@@ -97,9 +97,11 @@ qualityProgression = function(qs, SNPs, normal, db=T, nondb=T, excelFile='', mai
     Rowv = NULL
     if ( sum(doColour) > 1000 ) Rowv = NA
     RSC = ifelse(gene[doColour] %in% rG, rGcol[gene[doColour]], 'grey')
+    fs[fs==-0.02] = NA
     clusterOrder =
       makeHeatmap(fs[doColour,,drop=F], cexCol=1, labRow=gene[doColour], Rowv=Rowv,
                   RowSideColors = RSC, margins=c(8,15), main=main, , label='frequency')
+    fs[is.na(fs)] = -0.02
     if ( length(rG) > 0 ) {
       legend('right', rG, col = rGcol, lwd=10, bg='white')
     }

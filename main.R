@@ -88,4 +88,4 @@ data = analyse(inputFiles, outputDirectories, settings, forceRedo, runtimeSettin
 #Run the VEP afterburned to annotate variants.
 #Remakes some of the plots and output, adding annotation.
 #VEP must be callable from the terminal with the command vep.
-postAnalyseVEP(Rdirectory, plotDirectory, parameters, cosmicDir='../COSMIC')
+postAnalyseVEP(outputDirectories, inputFiles, genome=genome, cpus=cpus, cosmicDir='../COSMIC')

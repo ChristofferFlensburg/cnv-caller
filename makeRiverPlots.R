@@ -108,12 +108,13 @@ plotRiver = function(cloneTree, cloneStories, cloneLabels, normalise=T, xlim='de
 
 
 #plots a set of parallel disjoint clones, and recurs to each clones subclones to be plotted on top.
-addSubclone = function(cT, stories, ylims, colourPool=c(), margin=0.02) {
+addSubclone = function(cT, stories, ylims, colourPool=c(), margin=0.02, preNorm=1) {
   if ( length(colourPool) == 0 ) colourPool = mcri(c('black', 'blue', 'red', 'green', 'orange', 'magenta', 'cyan', 'violet', 'lightblue', 'grey', 'darkblue'))
   subClones = names(cT)
   subStories = stories[names(cT),,drop=F]
   maxSize = ylims[2,]-ylims[1,]
   cloneSum = margin*maxSize+colsums(t(margin*maxSize + t(subStories)))
+  unitarityViolating = any(preNorm*colsums(subStories)*0.9 > maxSize)
   cloneSum[cloneSum == 0] = 1   #this happens if all subclones are 0 at a sample. this avoids NaNs.
   norm = pmin(1, maxSize/cloneSum)
   base = ylims[1,]
@@ -123,13 +124,13 @@ addSubclone = function(cT, stories, ylims, colourPool=c(), margin=0.02) {
     range = rbind(base+margin*maxSize*norm, base + margin*maxSize*norm + subStory)
     range[2,] = pmax(base+margin*maxSize*norm, range[2,])
     subrange = rbind(range[1,], range[2]-margin*maxSize*norm)
-    addStream(range, col=colourPool[1])
+    addStream(range, col=colourPool[1], violating=unitarityViolating)
     usedCols = c(usedCols, colourPool[1])
     names(usedCols)[length(usedCols)] = subClone
     colourPool = colourPool[-1]
       if ( length(colourPool) == 0 ) colourPool = mcri(c('black', 'blue', 'red', 'green', 'orange', 'magenta', 'cyan', 'violet', 'lightblue', 'grey', 'darkblue'))
     if ( length(cT[[subClone]]) > 0 ) {
-      out = addSubclone(cT[[subClone]], stories, range, colourPool, margin)
+      out = addSubclone(cT[[subClone]], stories, range, colourPool, margin, preNorm=norm)
       usedCols = c(usedCols, out$usedCols)
       colourPool = out$colourPool
     }
@@ -139,7 +140,7 @@ addSubclone = function(cT, stories, ylims, colourPool=c(), margin=0.02) {
 }
 
 #plots the stream corresponding to a clone
-addStream = function(ylims, col='grey') {
+addStream = function(ylims, col='grey', violating=F) {
   for ( sample in 2:ncol(ylims) ) {
     x1 = sample-1
     x2 = sample
@@ -154,7 +155,7 @@ addStream = function(ylims, col='grey') {
     if ( y2h == y2l & y1h > y1l & !any(ylims[2,]-ylims[1,] != 0 & 1:ncol(ylims) > sample)) {
       range[2] = sqrt(y1h-y1l)
     }
-    addStreamSegment(x1, x2, y1l, y1h, y2l, y2h, range=range, col=col)
+    addStreamSegment(x1, x2, y1l, y1h, y2l, y2h, range=range, col=col,violating=violating)
   }
 }
 
@@ -162,7 +163,7 @@ addStream = function(ylims, col='grey') {
 third = function(x, x0, a, b, c) a + b*(x-x0) + c*(x-x0)^3
 
 #plots a smooth stream segment.
-addStreamSegment = function(x1, x2, y1low, y1high, y2low, y2high, range=c(0,1), col, parts = 100) {
+addStreamSegment = function(x1, x2, y1low, y1high, y2low, y2high, range=c(0,1), col, parts = 100, violating=F) {
   sh = (y1high-y2high)/2
   sl = (y1low-y2low)/2
   z = (x1-x2)/2
@@ -193,7 +194,10 @@ addStreamSegment = function(x1, x2, y1low, y1high, y2low, y2high, range=c(0,1), 
     yhigh = yhigh - (yhigh-ylow)*(1.5/r^2*xnorm^2 - xnorm^3/r^3)
     ylow = ifelse(xnorm < r, temp, yhigh)
   }
-  polygon(c(x, rev(x)), c(yhigh, rev(pmin(ylow, yhigh))), col=col, border=NA)
+  if ( !violating )
+    polygon(c(x, rev(x)), c(yhigh, rev(pmin(ylow, yhigh))), col=col, border=NA)
+  if ( violating )
+    polygon(c(x, rev(x)), c(yhigh, rev(pmin(ylow, yhigh))), col=col, border=NA, density=10, angle=45, lwd=5)
 }
 
 
@@ -283,11 +287,11 @@ heatmapStories = function(stories, storyList, SNPs, labels=NA, genome='hg19') {
 
 
 makeHeatmap = function(mx, nCol=200, col='default', maxVal='default', minVal='default', scale='none', label='', ...) {
-  if ( maxVal == 'default' ) maxVal = max(mx)
-  if ( minVal == 'default' ) minVal = min(mx)
-  if ( col == 'default' )
-    col = colourGradient(cols=mcri(c('white', 'cyan', 'blue', 'red')),
-      anchors=c(0, 0.2, 0.5, 1), steps=nCol)
+  if ( maxVal == 'default' ) maxVal = max(mx, na.rm=T)
+  if ( minVal == 'default' ) minVal = min(mx, na.rm=T)
+  if ( col[1] == 'default' )
+    col = colourGradient(cols=mcri(c('black', 'grey', 'cyan', 'blue', 'red')),
+      anchors=c(0, 0.02, 0.2, 0.5, 1), steps=nCol)
   ret = heatmap(mx, col=col, scale=scale, ...)
   
   barXmax = par('usr')[1]*0.88+par('usr')[2]*0.12

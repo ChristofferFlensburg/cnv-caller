@@ -199,7 +199,7 @@ severityToType = function(severity) {
 #'
 #' @details Runs VEP on the variants, and saves the variants (retrivable with loadData) with the addition
 #'          information from VEP. Or at least some of it.
-postAnalyseVEP = function(outputDirectories, inputFiles=inputFiles, cosmicDirectory='', forceRedo=F) {
+postAnalyseVEP = function(outputDirectories, inputFiles, genome='hg19', cpus=1, cosmicDirectory='', forceRedo=F) {
   Rdirectory = outputDirectories$Rdirectory
   plotDirectory = outputDirectories$plotDirectory
   data = loadData(Rdirectory)
@@ -225,7 +225,8 @@ postAnalyseVEP = function(outputDirectories, inputFiles=inputFiles, cosmicDirect
   names(timePoints) = names(individuals) = names
   samplePairs = metaToSamplePairs(names, individuals, normals)
   timeSeries = metaToTimeSeries(names, individuals, normals)
-    
+
+  outputSomaticVariants(variants, genome=genome, plotDirectory=plotDirectory, cpus=cpus, forceRedo=forceRedo)
   variants = runVEP(variants, plotDirectory, cpus=cpus, forceRedoVEP=forceRedo)
   allVariants = data$allVariants
   allVariants$variants = variants
