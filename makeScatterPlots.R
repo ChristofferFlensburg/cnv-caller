@@ -15,8 +15,8 @@ makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, ge
       boring = variants$variants[[pair[1]]]$var == 0 & variants$variants[[pair[2]]]$var == 0
       q1 = variants$variants[[pair[1]]][!boring,]
       q2 = variants$variants[[pair[2]]][!boring,]
-      ps=qualityScatter(q1, q2, variants$SNPs, cpus=cpus, verbose=F)
-      psuf=qualityScatter(q1, q2, variants$SNPs, cpus=cpus, plotFlagged=F, verbose=F)
+      ps=qualityScatter(q1, q2, variants$SNPs, cpus=cpus, verbose=F, doPlot=F)
+      psuf=qualityScatter(q1, q2, variants$SNPs, cpus=cpus, plotFlagged=F, verbose=F, doPlot=F)
       
       outfile = paste0(dir2, '/all.png')
       catLog('Plotting to', outfile, '\n')
@@ -67,7 +67,7 @@ makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, ge
 
 #helper function that generates fancy scatter plots of the frequencies of two samples.
 #Requires two variants objects, and a SNPs object.
-qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCov=10, main='', xlab='variant frequency: sample1', ylab='variant frequency: sample2', plotFlagged=T, cpus=1, verbose=T, print = F, printRedCut = 0.99, printOnlyNovel=F, plotPosition=F, genome='hg19', xlim=c(0,1), ylim=c(0,1), outputHighlighted=F, frame.plot=F, legend=T, redCut=0.75, forceCol=NA, add=F, GoI=c(), printCex=1, ...) {
+qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCov=10, main='', xlab='variant frequency: sample1', ylab='variant frequency: sample2', plotFlagged=T, cpus=1, verbose=T, print = F, printRedCut = 0.99, printOnlyNovel=F, plotPosition=F, genome='hg19', xlim=c(0,1), ylim=c(0,1), outputHighlighted=F, frame.plot=F, legend=T, redCut=0.75, forceCol=NA, add=F, GoI=c(), printCex=1, doPlot=T, ...) {
   use = q1$var > 0 | q2$var > 0
   q1 = q1[use,]
   q2 = q2[use,]
@@ -154,11 +154,11 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
   cex = pmin(maxCex, sqrt(sqrt(q1$cov*q2$cov)/covScale))
   if ( 'germline' %in% names(q1) ) pch = ifelse(clean, ifelse(db, 4, ifelse(q1$germline & !is.na(q1$germline), 3, 19)), ifelse(db, 4, 1))
   else pch = ifelse(clean, ifelse(db, 4, 19), ifelse(db, 4, 1))
-  if ( !add ) {
+  if ( !add & doPlot ) {
     plot(1, type='n', xlim=xlim, ylim=ylim, xlab = xlab, ylab = ylab, main=main, frame.plot=frame.plot, ...)
     segments(c(0,1,0,0,0, 0.5, 0), c(0,0, 0,1,0, 0, 0.5), c(0, 1, 1, 1, 1, 0.5, 1), c(1, 1, 0, 1, 1, 1, 0.5), col = rgb(0.8, 0.8, 0.8), lwd=0.3)
   }
-  if ( !plotPosition ) {
+  if ( !plotPosition & doPlot ) {
     if ( legend & !add ) {
       if ( plotFlagged )
         legend('bottomright', c('clean non-db', 'flagged non-db', 'clean germline-like non-db', 'clean db', 'flagged db', 'significantly different', 'high coverage', 'low coverage', 'severe effect', 'COSMIC Census Variant'), pch=c(19, 1, 3, 4, 4, 19, 19, 19, 1, 1), col=c('blue', 'grey', 'blue', 'black', 'grey', 'red', 'black', 'black', 'orange', 'green'), pt.cex=c(1,1,1,1,1,1,1,0.3, 1.5, 2), pt.lwd=c(1,1,1,1,1,1,1,1, 2, 4), bg='white')
@@ -171,7 +171,7 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
            lwd=pmin(maxCex, sqrt(sqrt(q1$cov*q2$cov)[cleanOrder]/covScale)), pch=pch[cleanOrder], col=col[cleanOrder])
   }
 
-  if ( 'severity' %in% names(q1) & 'severity' %in% names(q2) ) {
+  if ( 'severity' %in% names(q1) & 'severity' %in% names(q2) & doPlot ) {
     severity = pmin(q1$severity, q2$severity)
     severe = clean & use & severity <= 11 & !db
     points(freq1[severe], freq2[severe], cex=cex[severe]+(12-severity[severe])/10,
@@ -183,7 +183,7 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
     }
   }
   
-  if ( plotPosition ) {
+  if ( plotPosition & doPlot ) {
     segCex = pmin(1,(cex^2/7*abs((freq1+freq2)*(2-freq1-freq2))))
     segCex[freq1 < 0 | freq2 < 0] = 0
     pos = SNPs$start/chrLengths(genome)[as.character(SNPs$chr)]
@@ -203,7 +203,7 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
     text(1.02, 1.02, 'SNPs')
   }
 
-  if ( print ) {
+  if ( print & doPlot ) {
     toPrint = red > printRedCut
     if ( 'severity' %in% names(q1) & 'severity' %in% names(q2) ) {
       severity = pmin(q1$severity, q2$severity)
