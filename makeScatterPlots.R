@@ -135,6 +135,10 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
   dof = max(20, sum(clean & freq1+freq2 > 0 & freq1+freq2 < 2))
   if ( verbose ) catLog('MHC done with effective dof', dof, '\n')
   red = pmin(1, pmax(0, (-log10(ps)/log10(dof) - redCut)))
+  if ( any(is.na(red)) ) {
+    red[is.na(red)] = 0
+    warning('Got NA red colour in scatter.')
+  }
 
   use = q1$cov >= minCov & q2$cov >= minCov
   if ( any(is.na(use)) ) {
@@ -207,6 +211,7 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
       if ( 'isCosmicCensus' %in% names(q1) & 'isCosmicCensus' %in% names(q2) ) {
         isCosmic = (q1$isCosmicCensus | q2$isCosmicCensus) & severe
         toPrint = toPrint | isCosmic
+        col[isCosmic] = 'darkgreen'
       }
     }
     if ( length(GoI) > 0 )
