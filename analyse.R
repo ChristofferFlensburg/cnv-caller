@@ -429,7 +429,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
       }
       
       #share variants with normals
-      allVariants = try(matchFlagVariants(variants, normalVariants, individuals, normals,
+      allVariants = try(matchFlagVariants(variants, normalVariants, individuals, normals, genome,
         Rdirectory, cpus=cpus, forceRedoMatchFlag=forceRedoMatchFlag))
       if ( class(allVariants) == 'try-error' | !all(c('variants', 'normalVariants') %in% names(allVariants)) ) {
         catLog('Error in matchFlagVariants.\n')
@@ -470,7 +470,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   }
 
   #combine SNPs and CNVs into stories of subclones.
-  stories = try(getStories(variants=variants, normalVariants=normalVariants, cnvs=cnvs, timeSeries=timeSeries, normals=normals, Rdirectory=Rdirectory,
+  stories = try(getStories(variants=variants, normalVariants=normalVariants, cnvs=cnvs, timeSeries=timeSeries, normals=normals, genome=genome, Rdirectory=Rdirectory,
     plotDirectory=plotDirectory, cpus=cpus, forceRedo=forceRedoStories))
   if ( class(stories) == 'try-error' ) {
     catLog('Error in getStories!\n')

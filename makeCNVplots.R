@@ -64,7 +64,7 @@ plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', al
   if ( chr != 'all' ) {
     chrL = chrLengths(genome=genome)
     xlim = c(cumsum(chrL)[chr]-chrL[chr], cumsum(chrL)[chr])
-    cR = cR[cR$x1 > xlim[1] & cR$x2 < xlim[2],]
+    cR = cR[cR$x1 >= xlim[1] & cR$x2 <= xlim[2],]
     if ( nrow(cR) == 0 ) return()
   }
   else xlim=c(min(cR$x1), max(cR$x2))
@@ -137,43 +137,45 @@ plotCR = function(cR, showClonality=T, errorBars=T, chr='all', genome='hg19', al
 
   xf = (cR$x1+cR$x2)[cR$cov > 0]/2
   cRf = cR[cR$cov > 0,]
-  f = refUnbias(cRf$var/cRf$cov)
-  if ( 'f' %in% colnames(cR) ) f = cRf$f
-  yf = -1.1 + 2*f
-  if ( 'ferr' %in% names(cR) ) ferr = cRf$ferr
-  else ferr = 2*sqrt(cRf$var)/cRf$cov
-  fCex = pt.cex*pmax(0.2, pmin(3, sqrt(0.025/ferr)))
-  #plot the average MAFs, opaqueness from how likely a non-het is.
-  pHet = cRf$pHet
-  if ( 'postHet' %in% colnames(cRf) ) pHet = cRf$postHet
-  if ( 'stat' %in% colnames(cRf) ) pHet[cRf$stat > 0] = 1
-  if ( 'call' %in% colnames(cRf) ) {
-    pHet = rep(0, length(pHet))
-    pHet[cRf$call %in% c('AB', 'CL', 'AABB')] = 1
-  }
-  if ( moveHet ) col = rgb(pmax(0,pmin(1, 4*(0.5-f)))*colourDeviation,0,0, (1-pHet)*alpha)
-  else col = rgb(pmax(0,pmin(1, 4*(0.5-f)))*colourDeviation,0,0, alpha)
-  if ( fullFrequency ) {
-    xf = rep(xf, 2)
-    yf = c(-1.1 + f, -0.1 - f)
-    col = rep(col, 2)
-    ferr = rep(ferr, 2)
-  }
-  points(xf, yf, cex=fCex, pch=16, col=col)
-  if ( errorBars ) segments(xf, pmin(-0.1, yf+ferr), xf, pmax(-1.1, yf-ferr), col=col, lwd=fCex)
-  segments(cRf$x1, yf, cRf$x2, yf, lwd=fCex, col=col)
-  #plot f=0.5, opaqueness from how likely a het is.
-  if ( moveHet ) {
-    col = rgb(0,0,0, pHet*alpha)
-    yf = rep(-0.1, length(xf))
+  if ( nrow(cRf) > 0 ) {
+    f = refUnbias(cRf$var/cRf$cov)
+    if ( 'f' %in% colnames(cR) ) f = cRf$f
+    yf = -1.1 + 2*f
+    if ( 'ferr' %in% names(cR) ) ferr = cRf$ferr
+    else ferr = 2*sqrt(cRf$var)/cRf$cov
+    fCex = pt.cex*pmax(0.2, pmin(3, sqrt(0.025/ferr)))
+    #plot the average MAFs, opaqueness from how likely a non-het is.
+    pHet = cRf$pHet
+    if ( 'postHet' %in% colnames(cRf) ) pHet = cRf$postHet
+    if ( 'stat' %in% colnames(cRf) ) pHet[cRf$stat > 0] = 1
+    if ( 'call' %in% colnames(cRf) ) {
+      pHet = rep(0, length(pHet))
+      pHet[cRf$call %in% c('AB', 'CL', 'AABB')] = 1
+    }
+    if ( moveHet ) col = rgb(pmax(0,pmin(1, 4*(0.5-f)))*colourDeviation,0,0, (1-pHet)*alpha)
+    else col = rgb(pmax(0,pmin(1, 4*(0.5-f)))*colourDeviation,0,0, alpha)
     if ( fullFrequency ) {
-      xf = (cR$x1+cR$x2)[cR$cov > 0]/2
-      yf = rep(-0.6, length(xf))
-      ferr = ferr[1:length(yf)]
+      xf = rep(xf, 2)
+      yf = c(-1.1 + f, -0.1 - f)
+      col = rep(col, 2)
+      ferr = rep(ferr, 2)
     }
     points(xf, yf, cex=fCex, pch=16, col=col)
     if ( errorBars ) segments(xf, pmin(-0.1, yf+ferr), xf, pmax(-1.1, yf-ferr), col=col, lwd=fCex)
     segments(cRf$x1, yf, cRf$x2, yf, lwd=fCex, col=col)
+    #plot f=0.5, opaqueness from how likely a het is.
+    if ( moveHet ) {
+      col = rgb(0,0,0, pHet*alpha)
+      yf = rep(-0.1, length(xf))
+      if ( fullFrequency ) {
+        xf = (cR$x1+cR$x2)[cR$cov > 0]/2
+        yf = rep(-0.6, length(xf))
+        ferr = ferr[1:length(yf)]
+      }
+      points(xf, yf, cex=fCex, pch=16, col=col)
+      if ( errorBars ) segments(xf, pmin(-0.1, yf+ferr), xf, pmax(-1.1, yf-ferr), col=col, lwd=fCex)
+      segments(cRf$x1, yf, cRf$x2, yf, lwd=fCex, col=col)
+    }
   }
 
   if ( 'call' %in% colnames(cR) ) {

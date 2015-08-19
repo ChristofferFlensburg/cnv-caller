@@ -72,7 +72,6 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
     save(SNPs, file=SNPsSaveFile)
     catLog('done.\n')
 
-
     for ( i in 1:length(variants) )  variants[[i]]$db = SNPs[as.character(variants[[i]]$x),]$db
     for ( i in 1:length(variants) )  variants[[i]]$dbValidated = SNPs[as.character(variants[[i]]$x),]$dbValidated
     for ( i in 1:length(variants) )  variants[[i]]$dbMAF = SNPs[as.character(variants[[i]]$x),]$dbMAF
@@ -91,16 +90,32 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
     for ( sample in names(variants) ) {
       catLog(sample, '..', sep='')
       use = variants[[sample]]$cov > 0
-      png(paste0(FreqDirectory, sample, '-varcov.png'), height=2000, width=4000, res=144)
-      plotColourScatter((variants[[sample]]$var/variants[[sample]]$cov)[use], variants[[sample]]$cov[use],
-                        log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
+      cov = variants[[sample]]$cov[use] + 0.2 + noneg(rnorm(sum(use), 0, 0.2)-0.2)
+      var = variants[[sample]]$var[use] + 0.2 + noneg(rnorm(sum(use), 0, 0.2)-0.2)
+      png(paste0(FreqDirectory, sample, '-varcov.png'), height=10, width=20, res=144, unit='in')
+      plotColourScatter(pmin(1,var/cov), cov, log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
       dev.off()
-    }
-    use = variants[[sample]]$var > 0
-    if ( any(use) ) {
-      png(paste0(FreqDirectory, sample, '-hist.png'), height=2000, width=4000, res=144)
-      hist((variants[[sample]]$var/variants[[sample]]$cov)[use], breaks=(0:100)/100, col=mcri('blue'))
-      dev.off()
+      
+      use = variants[[sample]]$var > 0
+      if ( any(use) ) {
+        pdf(paste0(FreqDirectory, sample, '-hist.pdf'), height=7, width=14)
+        hist((variants[[sample]]$var/variants[[sample]]$cov)[use],
+             breaks=(0:100)/100, col=mcri('blue'), main='all Variants',
+             xlab='variant frequency', ylab='number of variants')
+        cleanUse = use & variants[[sample]]$flag == ''
+        if ( any(cleanUse) ) {
+          hist((variants[[sample]]$var/variants[[sample]]$cov)[cleanUse],
+               breaks=(0:100)/100, col=mcri('blue'), main='clean Variants',
+               xlab='variant frequency', ylab='number of variants')
+        }
+        cleanDbUse = cleanUse & normalVariants[[sample]]$db
+        if ( any(cleanDbUse) ) {
+          hist((variants[[sample]]$var/variants[[sample]]$cov)[cleanDbUse],
+               breaks=(0:100)/100, col=mcri('blue'), main='clean dbSNP Variants',
+               xlab='variant frequency', ylab='number of variants')
+        }
+        dev.off()
+      }
     }
     catLog('done.\n')  
   }
@@ -199,15 +214,25 @@ matchTodbSNPs = function(SNPs, dir='~/data/dbSNP', genome='hg19') {
       catLog('Chromosome ', chr, ': no SNPs found in this chromosome, done.\n', sep='')
       next
     }
+    
     RsaveFile = paste0(dir,'/ds_flat_ch', chr, '.Rdata')
     if ( !file.exists(RsaveFile) ) {
-      catLog('Chromosome ', chr, ': no SNP file found at', RsaveFile,'. Marking all as not dbSNP.\n', sep='')
-      stop('dbSNP file not found!')
+      flatFile = paste0(dir,'/ds_flat_ch', chr, '.dbSNP')
+      if ( !file.exists(flatFile) ) {
+        catLog('Chromosome ', chr, ': no SNP file found at', flatFile,'. Marking all as not dbSNP.\n', sep='')
+        stop('dbSNP file not found!')
+      }
+      db = read.table(flatFile, header = T, fill=T)
+      catLog('extracting positions..')
+      db = db[db$pos != '?',] #without position, the dbSNP is useless
+      catLog('saving positions for future use..')
+      save('db', file=RsaveFile)
     }
     else {
       catLog('Chromosome ', chr, ': loading db positions..')
       load(file=RsaveFile)
     }
+    
     catLog('matching to sample postions..')
     chrSNPsI = which(SNPs$chr == chr)
     varPos = SNPs$start[chrSNPsI] + ifelse(grepl('[-]', SNPs$variant[chrSNPsI]), 1, 0)
@@ -768,19 +793,33 @@ getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, 
     FreqDirectory = paste0(diagnosticPlotsDirectory, '/frequencyDistribution/')
     catLog('Plotting frequency distributions to ', FreqDirectory,'..', sep='')
     if ( !file.exists(FreqDirectory) ) dir.create(FreqDirectory)
-    for ( sample in names(variants) ) {
+    for ( sample in names(normalVariants) ) {
       catLog(sample, '..', sep='')
-      use = variants[[sample]]$cov > 0
+      use = normalVariants[[sample]]$cov > 0
+      cov = normalVariants[[sample]]$cov[use] + 0.2 + noneg(rnorm(sum(use), 0, 0.2)-0.2)
+      var = normalVariants[[sample]]$var[use] + 0.2 + noneg(rnorm(sum(use), 0, 0.2)-0.2)
+      png(paste0(FreqDirectory, sample, '-varcov.png'), height=10, width=20, res=144, unit='in')
+      plotColourScatter(pmin(1,var/cov), cov, log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
+      dev.off()
+      
+      use = normalVariants[[sample]]$var > 0
       if ( any(use) ) {
-        png(paste0(FreqDirectory, sample, '-scatter.png'), height=2000, width=4000, res=144)
-        plotColourScatter((variants[[sample]]$var/variants[[sample]]$cov)[use], variants[[sample]]$cov[use],
-                          log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
-        dev.off()
-      }
-      use = variants[[sample]]$var > 0 & !is.na(variants[[sample]]$var)
-      if ( any(use) ) {
-        png(paste0(FreqDirectory, sample, '-hist.png'), height=2000, width=4000, res=144)
-        hist(variants[[sample]]$var[use]/variants[[sample]]$cov[use], breaks=(-1:101)/100, col=mcri('blue'))
+        pdf(paste0(FreqDirectory, sample, '-hist.pdf'), height=7, width=14)
+        hist((normalVariants[[sample]]$var/normalVariants[[sample]]$cov)[use],
+             breaks=(0:100)/100, col=mcri('blue'), main='all Variants',
+             xlab='variant frequency', ylab='number of variants')
+        cleanUse = use & normalVariants[[sample]]$flag == ''
+        if ( any(cleanUse) ) {
+          hist((normalVariants[[sample]]$var/normalVariants[[sample]]$cov)[cleanUse],
+               breaks=(0:100)/100, col=mcri('blue'), main='clean Variants',
+               xlab='variant frequency', ylab='number of variants')
+        }
+        cleanDbUse = cleanUse & normalVariants[[sample]]$db
+        if ( any(cleanDbUse) ) {
+          hist((normalVariants[[sample]]$var/normalVariants[[sample]]$cov)[cleanDbUse],
+               breaks=(0:100)/100, col=mcri('blue'), main='clean dbSNP Variants',
+               xlab='variant frequency', ylab='number of variants')
+        }
         dev.off()
       }
     }

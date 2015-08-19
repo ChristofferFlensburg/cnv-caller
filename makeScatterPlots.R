@@ -76,6 +76,9 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
   freq2 = q2$var/q2$cov
   freq2[is.na(freq2)] = -0.02
 
+  q1$cov = q1$var + q1$ref
+  q2$cov = q2$var + q2$ref
+
   temp = options()$scipen
   options(scipen = 100)
   xChar = as.character(q1$x)

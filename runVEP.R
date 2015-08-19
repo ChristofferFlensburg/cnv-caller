@@ -8,7 +8,7 @@
 #' @param forceRedoVEP Logical: if VEP should be rerun even if saved data already exists.
 #'
 #' @details This function calls VEP on the output from outputSomaticVariants. For this, VEP needs to be callable by system('vep').
-runVEP = function(variants, plotDir, cpus=1, forceRedoVEP=F) {
+runVEP = function(variants, plotDir, cpus=1, genome='hg19', forceRedoVEP=F) {
   catLog('VEP-ing..')
   dir = paste0(plotDir, '/somatics/')
   for ( name in names(variants$variants) ) {
@@ -19,7 +19,11 @@ runVEP = function(variants, plotDir, cpus=1, forceRedoVEP=F) {
       catLog('Moving to ', dir, '\n')
       setwd(dir)
       catLog(name, ': ', sum(variants$variants[[name]]$somaticP > 0), ' variants.\n', sep='')
-      if ( sum(variants$variants[[name]]$somaticP > 0) == 0 ) next
+      if ( sum(variants$variants[[name]]$somaticP > 0) == 0 ) {
+        catLog('Moving back to ', wd, '\n')
+        setwd(wd)
+        next
+      }
       call = paste0('vep -i ', basename(infile), ' -o ', basename(VEPfile), ' --everything --force_overwrite --fork ', cpus)
       catLog(call, '\n')
       systemRet = system(call, intern=T)
@@ -55,7 +59,7 @@ runVEP = function(variants, plotDir, cpus=1, forceRedoVEP=F) {
       var = as.character(VEPdata$V3)
       type = as.character(VEPdata$V7)
       sev = sapply(type, typeToSeverity)
-      x = chrToX(chr, as.numeric(pos))
+      x = chrToX(chr, as.numeric(pos), genome=genome)
 
       lastCol = strsplit(as.character(VEPdata$V14), ';')
       polyPhen = sapply(lastCol, function(strs) {
@@ -227,7 +231,7 @@ postAnalyseVEP = function(outputDirectories, inputFiles, genome='hg19', cpus=1, 
   timeSeries = metaToTimeSeries(names, individuals, normals)
 
   outputSomaticVariants(variants, genome=genome, plotDirectory=plotDirectory, cpus=cpus, forceRedo=forceRedo)
-  variants = runVEP(variants, plotDirectory, cpus=cpus, forceRedoVEP=forceRedo)
+  variants = runVEP(variants, plotDirectory, cpus=cpus, genome=genome, forceRedoVEP=forceRedo)
   allVariants = data$allVariants
   allVariants$variants = variants
   
@@ -256,10 +260,11 @@ getMoreVEPinfo = function(variants, plotDirectory, cosmicDirectory='') {
   for ( name in names(variants$variants) ) {
     VEPfile = paste0(dir, '/', name, '.VEP.txt')
     VEPdata = try(read.table(VEPfile, fill=T), silent=T)
-    if ( class(VEPdata) == 'try-error' ) {
-      catLog('failed to read VEP file.\n')
+    if ( sum(variants$variants[[name]]$somaticP > 0) == 0 ) {
+      catLog('no somatic variants.\n')
       variants$variants[[name]]$type = rep('notChecked', nrow(variants$variants[[name]]))
       variants$variants[[name]]$severity = rep(100, nrow(variants$variants[[name]]))
+      next
     }
     else {
       ID = as.numeric(as.character(VEPdata$V1))

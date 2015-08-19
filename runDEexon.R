@@ -3,7 +3,7 @@
 #The function runs differential coverage one each sample vs the pool of normals using limma-voom.
 #the counts are loess and binding strength corrected.
 runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory, plotDirectory, normalRdirectory,
-  settings=list(), cpus=1,
+  settings=list(), genome='hg19', cpus=1,
   forceRedoFit=F, forceRedoCount=F, forceRedoNormalCount=F) {
   catLog('Starting differential coverage analysis by sample.\n')
 
@@ -210,9 +210,9 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
         if ( !file.exists(plotfile) | forceRedoFit ) {
           ylim = quantile(LFC, probs=c(0.01, 0.99))+c(0.5,0.5)
           png(plotfile, height=10, width=20, res=144, unit='in')
-          plotColourScatter(annotationToX(annotation), LFC, cex=w, ylim=ylim, xlab='genome',
+          plotColourScatter(annotationToX(annotation, genome), LFC, cex=w, ylim=ylim, xlab='genome',
                             ylab='~log(1+read depth)', verbose=F)
-          points(annotationToX(annotation), (dn-mean(dn))/1.5 + mean(ylim), cex=w/2, pch=16,
+          points(annotationToX(annotation, genome), (dn-mean(dn))/1.5 + mean(ylim), cex=w/2, pch=16,
                  col=mcri('orange', 0.5))
           addChromosomeLines(ylim=ylim, col=mcri('green'))
           legend('bottomright', c('binding strength'), pch=16, col=mcri('orange'), bg='white')
@@ -222,9 +222,9 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
         if ( !file.exists(plotfile) | forceRedoFit ) {
           ylim = quantile(LFC + log(correctionFactor), probs=c(0.01, 0.99))+c(0.5,0.5)
           png(plotfile, height=10, width=20, res=144, unit='in')
-          plotColourScatter(annotationToX(annotation), LFC, cex=w, ylim=ylim, xlab='genome',
+          plotColourScatter(annotationToX(annotation, genome), LFC, cex=w, ylim=ylim, xlab='genome',
                             ylab='~log(1+read depth)', verbose=F)
-          points(annotationToX(annotation), (dn-mean(dn))/1.5 + mean(ylim), cex=w/2, pch=16,
+          points(annotationToX(annotation, genome), (dn-mean(dn))/1.5 + mean(ylim), cex=w/2, pch=16,
                  col=mcri('orange', 0.5))
           addChromosomeLines(ylim=ylim, col=mcri('green'))
           legend('bottomright', c('binding strength'), pch=16, col=mcri('orange'), bg='white')
@@ -248,7 +248,7 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
   #binding strength correcting with running average
   if ( getSettings(settings, 'GCregionCorrection') ) {
     catLog('Correcting for regional binding strength bias..')
-    x = annotationToX(annotation)
+    x = annotationToX(annotation, genome)
     counts = countsSexLoBS
     w = pmin(2, pmax(0.1, sqrt(rowMeans(countsOri)/100)))
     regionIs = mclapply(x, function(X) which(abs(x-X) < 5e5), mc.cores=cpus)
@@ -288,9 +288,9 @@ runDE = function(bamFiles, names, externalNormalBams, captureRegions, Rdirectory
         if ( !file.exists(plotfile) | forceRedoFit ) {
           ylim = quantile(LFC, probs=c(0.01, 0.99))+c(0.5,0.5)
           png(plotfile, height=10, width=20, res=144, unit='in')
-          plotColourScatter(annotationToX(annotation), LFC, cex=w, ylim=ylim,
+          plotColourScatter(annotationToX(annotation, genome), LFC, cex=w, ylim=ylim,
                             xlab='genome', ylab='~log(1+read depth)', verbose=F)
-          points(annotationToX(annotation), (regionDN-mean(regionDN))/1.5 + mean(ylim), cex=w/2,
+          points(annotationToX(annotation, genome), (regionDN-mean(regionDN))/1.5 + mean(ylim), cex=w/2,
                  pch=16, col=mcri('orange', 0.5))
           addChromosomeLines(ylim=ylim, col=mcri('green'))
           legend('bottomright', c('binding strength'), pch=16, col=mcri('orange'), bg='white')

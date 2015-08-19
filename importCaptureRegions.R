@@ -32,7 +32,7 @@ importCaptureRegions = function(bedFile, reference, Rdirectory, genome='hg19') {
       catLog('Done and saved named file, now proceeding to binding strength.\n')
     }
     if ( reference == '' ) stop('Need a reference entry in the input files to calcuate binding strengths.')
-    addBindingStrength(namedFile, reference)
+    addBindingStrength(namedFile, reference, genome=genome)
   }
   catLog('Loading capture regions...')
   cR = read.table(bsFile, fill=T, quote='')
@@ -102,10 +102,10 @@ makeCaptureFromFeatureCountRegions = function(outputBed, genome='hg19') {
   symbol[is.na(symbol)] = genes$query[is.na(symbol)]
   names(symbol) = genes$query
 
-  chr = annotationToChr(ann)
+  chr = annotationToChr(ann, genome)
   start = ann$Start
   end = ann$End
-  x1x2 = annotationToX1X2(ann)
+  x1x2 = annotationToX1X2(ann, genome)
   x1 = xToPos(x1x2$x1, genome)
   x2 = xToPos(x1x2$x2, genome)
   ret = rbind(chr, start, pmax(start, end), symbol[as.character(ann$GeneID)])
@@ -153,29 +153,11 @@ nameCaptureRegions = function(inFile, outFile, Rdirectory, genome='hg19') {
 
 xToGene = function(x, genome='hg19', saveDirectory='', verbose=T) {
   if ( length(x) == 0 ) return(c())
-  saveFile = paste0(saveDirectory, '/ensembl', genome, 'annotation.Rdata')
-  if ( verbose ) catLog('Linking', length(x), 'positions to genes...')
+
+  bm = importEnsemblData(x, saveDirectory, genome, verbose=verbose)
+  
   chr = xToChr(x, genome)
   pos = xToPos(x, genome)
-
-  if ( file.exists(saveFile) ) load(saveFile)
-  else {
-    if ( verbose ) catLog('waiting for biomaRt/ensembl server...')
-    if ( genome == 'hg19' )
-      mart = useMart(biomart='ensembl', dataset = 'hsapiens_gene_ensembl',
-        version='Ensembl Genes', host='grch37.ensembl.org')
-    else stop('hg19 is only supported genome atm, sorry. :(')
-    
-    bm = getBM(attributes=c('chromosome_name', 'start_position', 'end_position', 'hgnc_symbol', 'ensembl_transcript_id'), filters = c('chromosome_name', 'start', 'end'), value=list(chr, pos-1000, pos+1000), mart=mart)
-    
-    #make sure any empty symbol entries are last, so that we can default to first hit
-    bm = bm[order(bm$hgnc_symbol, decreasing=T),]
-    #replace empty symbol entries with ensemble code and remove duplicates
-    bm$hgnc_symbol[bm$hgnc_symbol == ''] = bm$ensembl_transcript_id[bm$hgnc_symbol == '']
-    bm = bm[!duplicated(bm$hgnc_symbol),]
-    
-    if ( file.exists(dirname(saveFile)) ) save(bm, file=saveFile)
-  }
 
   #match variant positions to genes ranges
   if ( verbose ) catLog('matching ranges to positions...')
@@ -188,13 +170,92 @@ xToGene = function(x, genome='hg19', saveDirectory='', verbose=T) {
   
   rownames(OLs) = OLs[,1]
 
-  genes = sapply(1:length(x), function(i) {
-    rowname = as.character(i)
-    if ( rowname %in% rownames(OLs) ) return(names(geneRanges)[OLs[rowname,2]])
-    return('?')
-    })
+  xIndex = as.character(1:length(x))
+  hasHit = xIndex %in% rownames(OLs)
+  genes = rep('?', length(x))
+  genes[hasHit] = names(geneRanges)[OLs[xIndex[hasHit],2]]
+  
+  #genes = sapply(1:length(x), function(i) {
+  #  rowname = as.character(i)
+  #  if ( rowname %in% rownames(OLs) ) return(names(geneRanges)[OLs[rowname,2]])
+  #  return('?')
+  #  })
   if ( sum(genes == '?') > 0 & verbose ) catLog('failed', sum(genes == '?'), 'positions...')
   if ( verbose ) catLog('done.\n')
 
   return(genes)
+}
+
+
+importEnsemblData = function(x, saveDirectory, genome, verbose=T) {
+  saveFile = paste0(saveDirectory, '/ensembl', genome, 'annotation.Rdata')
+  if ( verbose ) catLog('Linking', length(x), 'positions to genes...')
+  chr = xToChr(x, genome)
+  pos = xToPos(x, genome)
+  
+  if ( file.exists(saveFile) ) load(saveFile)
+  else {
+    if ( verbose ) catLog('waiting for biomaRt/ensembl server...')
+    if ( genome == 'hg19' )
+      mart = useMart(biomart='ensembl', dataset = 'hsapiens_gene_ensembl',
+        version='Ensembl Genes', host='grch37.ensembl.org')
+    else stop('hg19 is only supported genome atm, sorry. :(')
+    
+    maxLength = 50000
+    if ( length(chr) > maxLength ) {
+      if ( verbose ) catLog('by batch.')
+      bm = getBM(attributes=c('chromosome_name', 'start_position', 'end_position', 'hgnc_symbol', 'ensembl_transcript_id', 'gene_biotype'), filters = c('chromosome_name', 'start', 'end'),
+        value=list(chr[1:maxLength], pos[1:maxLength]-1000, pos[1:maxLength]+1000), mart=mart)
+      chr = chr[-(1:maxLength)]
+      pos = pos[-(1:maxLength)]
+
+      while(length(chr) > maxLength) {
+        if ( verbose ) catLog('.')
+        moreBm = getBM(attributes=c('chromosome_name', 'start_position', 'end_position', 'hgnc_symbol', 'ensembl_transcript_id', 'gene_biotype', 'hsapiens_paralog_ensembl_gene', 'hsapiens_paralog_chrom_start'), filters = c('chromosome_name', 'start', 'end'),
+          value=list(chr[1:maxLength], pos[1:maxLength]-1000, pos[1:maxLength]+1000), mart=mart)
+        chr = chr[-(1:maxLength)]
+        pos = pos[-(1:maxLength)]
+        bm = rbind(bm, moreBm)
+      }
+
+      if ( verbose ) catLog('.')
+      moreBm = getBM(attributes=c('chromosome_name', 'start_position', 'end_position', 'hgnc_symbol', 'ensembl_transcript_id', 'gene_biotype'), filters = c('chromosome_name', 'start', 'end'),
+        value=list(chr, pos-1000, pos+1000), mart=mart)
+      bm = rbind(bm, moreBm)
+      chr = xToChr(x, genome)
+      pos = xToPos(x, genome)
+    }
+    else {
+      bm = getBM(attributes=c('chromosome_name', 'start_position', 'end_position', 'hgnc_symbol', 'ensembl_transcript_id', 'gene_biotype'), filters = c('chromosome_name', 'start', 'end'), value=list(chr, pos-1000, pos+1000), mart=mart)
+    }
+    
+    #make sure any empty symbol entries are last, so that we can default to first hit
+    bm = bm[order(bm$hgnc_symbol, decreasing=T),]
+    #replace empty symbol entries with ensemble code and remove duplicates
+    bm$hgnc_symbol[bm$hgnc_symbol == ''] = bm$ensembl_transcript_id[bm$hgnc_symbol == '']
+    bm = bm[!duplicated(bm$hgnc_symbol),]
+    
+    if ( file.exists(dirname(saveFile)) ) save(bm, file=saveFile)
+  }
+
+  return(bm)
+}
+
+
+hasParalog = function(genes, genome) {
+  
+  if ( genome == 'hg19' )
+    mart = useMart(biomart='ensembl', dataset = 'hsapiens_gene_ensembl',
+      version='Ensembl Genes', host='grch37.ensembl.org')
+  bm = getBM(attributes=c('hgnc_symbol', 'ensembl_transcript_id', 'gene_biotype'), filters = c('hgnc_symbol'), value=list(genes), mart=mart)
+
+  ensemblGenes = unique(bm$ensembl_transcript_id)
+  paralogs = getBM(attributes=c('hsapiens_paralog_ensembl_gene', 'ensembl_transcript_id', 'hsapiens_paralog_paralogy_confidence'), filters = c('ensembl_transcript_id'), value=list(ensemblGenes), mart=mart)
+
+  paralogs = paralogs[paralogs$hsapiens_paralog_ensembl_gene != '',]
+  ensemblHasParalog = ensemblGenes %in% paralogs$ensembl_transcript_id
+  ensemblWithParalog = ensemblGenes[ensemblHasParalog]
+    
+  bmWithParalog = bm[bm$ensembl_transcript_id %in% ensemblWithParalog,]
+  hasParalog = genes %in% bmWithParalog$hgnc_symbol
 }

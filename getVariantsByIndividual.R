@@ -77,7 +77,7 @@ getVariantsByIndividual = function(metaData, captureRegions, genome, BQoffset, d
   q = q[order(q$x),]
   inGene = xToGene(q$x, saveDirectory=Rdirectory)
   names(inGene) = q$x
-  SNPs = data.frame(x=q$x, chr=xToChr(q$x), start=xToPos(q$x), end=xToPos(q$x),
+  SNPs = data.frame(x=q$x, chr=xToChr(q$x, genome), start=xToPos(q$x, genome), end=xToPos(q$x, genome),
                     inGene=inGene, reference=q$reference, variant=q$variant, db=q$db)
   variantsBI = lapply(variantsBI, function(q) {
     q$inGene = inGene[as.character(q$x)]
@@ -197,8 +197,16 @@ matchTodbSNPs = function(variants, dir='~/data/dbSNP', genome='hg19') {
     chr = gsub('^M$', 'MT', chr)
     RsaveFile = paste0(dir,'/ds_flat_ch', chr, '.Rdata')
     if ( !file.exists(RsaveFile) ) {
-      catLog('Chromosome ', chr, ': no SNP file found at', RsaveFile,'. Marking all as not dbSNP.\n', sep='')
-      stop('dbSNP file not found!')
+      flatFile = paste0(dir,'/ds_flat_ch', chr, '.dbSNP')
+      if ( !file.exists(flatFile) ) {
+        catLog('Chromosome ', chr, ': no SNP file found at', flatFile,'. Marking all as not dbSNP.\n', sep='')
+        stop('dbSNP file not found!')
+      }
+      db = read.table(flatFile, header = T, fill=T)
+      catLog('extracting positions..')
+      db = db[db$pos != '?',] #without position, the dbSNP is useless
+      catLog('saving positions for future use..')
+      save('db', file=RsaveFile)
     }
     else {
       catLog('Chromosome ', chr, ': loading db positions..')
@@ -207,7 +215,7 @@ matchTodbSNPs = function(variants, dir='~/data/dbSNP', genome='hg19') {
     
     catLog('matching to variant postions..')
     variants = lapply(variants, function(q) {
-      thisChr = which(xToChr(q$x) == chr)
+      thisChr = which(xToChr(q$x, genome) == chr)
       if ( length(thisChr) == 0 ) return(q)
       varPos = xToPos(q$x)[thisChr] + ifelse(grepl('[-]', q$variant[thisChr]), 1, 0)
       dbQ = db[db$pos %in% varPos,]

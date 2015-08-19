@@ -51,31 +51,22 @@ callCNVs = function(variants, normalVariants, fitS, SNPs, names, individuals, no
 #the high level function that controls the steps of the CNV calling for given sample and normal variant objects.
 callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVariants, fit, plotDirectory, name, individuals, SNPs, genome='hg19', cpus=1) {
   #estimate reference bias and variance from the selected normal hets.
-  if ( class(normalVariants) == 'logical') {
-    a=try(setVariantLoss(moreNormalVariants))
-    if ( class(a) == 'try-error' ) {
-      catLog('Error in setVariantLoss(moreNormalVariants)\n')
-      stop('Error in setVariantLoss(moreNormalVariants)!')
-    }
-  }
-  else {
-    a=try(setVariantLoss(normalVariants))
-    if ( class(a) == 'try-error' ) {
-      catLog('Error in setVariantLoss(normalVariants)\n')
-      stop('Error in setVariantLoss(normalVariants)!')
-    }
+  a=try(setVariantLoss(moreNormalVariants))
+  if ( class(a) == 'try-error' ) {
+    catLog('Error in setVariantLoss(moreNormalVariants)\n')
+    stop('Error in setVariantLoss(moreNormalVariants)!')
   }
 
   #select good germline het variants from normals:
   if ( class(normalVariants) == 'logical') {
-    use = try(selectGermlineHetsFromCancer(cancerVariants, moreNormalVariants, fit$sex, SNPs, cpus=cpus))
+    use = try(selectGermlineHetsFromCancer(cancerVariants, moreNormalVariants, fit$sex, SNPs, genome, cpus=cpus))
     if ( class(use) == 'try-error' ) {
       catLog('Error in selectGermlineHetsFromCancer(cancerVariants, moreNormalVariants, cpus=cpus)\n')
       stop('Error in selectGermlineHetsFromCancer(cancerVariants, moreNormalVariants, cpus=cpus)!')
     }
   }
   else {
-    use = try(selectGermlineHets(normalVariants, moreNormalVariants, fit$sex, SNPs, cpus=cpus))
+    use = try(selectGermlineHets(normalVariants, moreNormalVariants, fit$sex, SNPs, genome, cpus=cpus))
     if ( class(use) == 'try-error' ) {
       catLog('Error in selectGermlineHets(normalVariants, moreNormalVariants, cpus=cpus)\n')
       stop('Error in selectGermlineHets(normalVariants, moreNormalVariants, cpus=cpus)!')
@@ -87,6 +78,7 @@ callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVarian
   #summarise by capture region
   catLog('Summarising capture regions..')
   mC = maxCov()
+  catLog('using effective coverage capped at ', mC, '..', sep='')
   d = cancerVariants$cov
   effectiveCov = round(d*(1 + d/mC)/(1 + d/mC + d^2/mC^2))
   effectiveVar = round(cancerVariants$var/cancerVariants$cov*effectiveCov)
@@ -139,7 +131,7 @@ callCancerNormalCNVs = function(cancerVariants, normalVariants, moreNormalVarian
 
 
 #helper function that selects germline het SNPs in the presence of a normal sample from the same individual.
-selectGermlineHets = function(normalVariants, moreNormalVariants, sex, SNPs, minCoverage = 10, cpus=1) {
+selectGermlineHets = function(normalVariants, moreNormalVariants, sex, SNPs, genome, minCoverage = 10, cpus=1) {
   #only bother with variants that have enough coverage so that we can actually see a change in frequency
   catLog('Taking variants with minimum coverage of', minCoverage, '...')
   decentCoverage = normalVariants$cov >= minCoverage
@@ -166,7 +158,7 @@ selectGermlineHets = function(normalVariants, moreNormalVariants, sex, SNPs, min
   #pick het in matching normal sample
   catLog('Taking variants that are het in the normal sample..')
   normalF = normalVariants$var/normalVariants$cov
-  normalHet = pBinom(normalVariants$cov, normalVariants$var, refBias(0.5)) > 0.1 & abs(normalF-0.5) < 0.25 & normalVariants$flag == ''
+  normalHet = pBinom(normalVariants$cov, normalVariants$var, refBias(0.5)) > 0.1 & abs(normalF-0.5) < 0.15 & normalVariants$flag == ''
   use = use[normalHet]
   normalVariants = normalVariants[use,]
   catLog('done! Got', sum(normalHet), 'variants.\n')
@@ -199,7 +191,7 @@ selectGermlineHets = function(normalVariants, moreNormalVariants, sex, SNPs, min
     catLog('Removing variants in male X and Y...')
   else
     catLog('Removing variants in female Y...')
-  notHet = xToChr(normalVariants$x) %in% ifelse(sex=='male', c('X','Y'), 'Y')
+  notHet = xToChr(normalVariants$x, genome) %in% ifelse(sex=='male', c('X','Y'), 'Y')
   use = rownames(normalVariants)[!notHet]
   normalVariants = normalVariants[use,]
   extrapolatedFalse = round(sum(chrLengths(genome))/sum(chrLengths(genome)[ifelse(sex=='male', c('X','Y'), 'Y')])*sum(notHet))
@@ -210,7 +202,7 @@ selectGermlineHets = function(normalVariants, moreNormalVariants, sex, SNPs, min
 }
 
 #helper function that selects germline het SNPs in the absence of a normal sample from the same individual.
-selectGermlineHetsFromCancer = function(cancerVariants, moreNormalVariants, sex, SNPs, minCoverage = 10, cpus=1) {
+selectGermlineHetsFromCancer = function(cancerVariants, moreNormalVariants, sex, SNPs, genome, minCoverage = 10, cpus=1) {
   #only bother with variants that have enough coverage so that we can actually see a change in frequency
   catLog('Taking variants with minimum coverage of', minCoverage, '...')
   decentCoverage = cancerVariants$cov >= minCoverage
@@ -276,7 +268,7 @@ selectGermlineHetsFromCancer = function(cancerVariants, moreNormalVariants, sex,
     catLog('Removing variants in male X and Y...')
   else
     catLog('Removing variants in female Y...')
-  notHet = xToChr(cancerVariants$x) %in% ifelse(sex=='male', c('X','Y'), 'Y')
+  notHet = xToChr(cancerVariants$x, genome) %in% ifelse(sex=='male', c('X','Y'), 'Y')
   use = rownames(cancerVariants)[!notHet]
   cancerVariants = cancerVariants[use,]
   extrapolatedFalse = round(sum(chrLengths(genome))/sum(chrLengths(genome)[ifelse(sex=='male', c('X','Y'), 'Y')])*sum(notHet))
@@ -455,10 +447,10 @@ postProcess = function(clusters, cRs, eFreqs, plotDirectory, name, genome='hg19'
   catLog('call CNVs..')
   clusters = addCall(clusters, eFreqs)
   clusters = fixFalseSNPcall(clusters, eFreqs)
-  sCAN = sameCallAsNeighbour(clusters)
+  sCAN = sameCallAsNeighbour(clusters, genome)
   if ( any(sCAN) ) {
     catLog('found', sum(sCAN),'neighbouring regions with same call: merge and redo postprocessing!\n')
-    clusters = forceMerge(clusters, sCAN)
+    clusters = forceMerge(clusters, sCAN, genome)
     ret = postProcess(clusters, cRs, eFreqs, plotDirectory, name, genome=genome, cpus=cpus)
     ret$shift = ret$shift + shift
     return(ret)
@@ -493,9 +485,9 @@ fixFalseSNPcall = function(clusters, eFreqs) {
   return(clusters)
 }
 
-sameCallAsNeighbour = function(clusters) {
+sameCallAsNeighbour = function(clusters, genome) {
   if ( nrow(clusters) == 1 ) return(F)
-  chr = xToChr(clusters$x1)
+  chr = xToChr(clusters$x1, genome)
   first = 1:(nrow(clusters)-1)
   second = 2:nrow(clusters)
   sameCall = chr[first] == chr[second] &
@@ -505,8 +497,8 @@ sameCallAsNeighbour = function(clusters) {
   return(sameCall)
 }
 
-forceMerge = function(clusters, toMerge) {
-  chrs = xToChr(clusters$x1)
+forceMerge = function(clusters, toMerge, genome) {
+  chrs = xToChr(clusters$x1, genome)
   redoChrs = unique(chrs[which(toMerge)])
   newClusters = list()
   for ( chr in redoChrs ) {

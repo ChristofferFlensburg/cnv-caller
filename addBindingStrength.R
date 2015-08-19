@@ -16,6 +16,7 @@ addBindingStrength = function(bedFile, fastaFile, genome='hg19', forceRedo=F) {
 
   catLog('Loading genome from', fastaFile)
   reference = importReferenceGenome(file=fastaFile)
+  names(reference) = gsub('chr', '', names(reference))
   catLog(' done.\n')
 
   catLog('Loading capture regions from', bedFile)

@@ -1,7 +1,7 @@
 
 #summarises somatic SNVs and CNV calls into subclone evolution over samples
 #and determines which subclones are subclones of which other subclones.
-getStories = function(variants, normalVariants, cnvs, timeSeries, normals, Rdirectory, plotDirectory, cpus=1, forceRedo=F) {
+getStories = function(variants, normalVariants, cnvs, timeSeries, normals, genome, Rdirectory, plotDirectory, cpus=1, forceRedo=F) {
   setVariantLoss(normalVariants$variants)
   stories = list()
   saveFile = paste0(Rdirectory, '/stories.Rdata')
@@ -40,7 +40,7 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, normals, Rdire
       
       #combine CNV calls over sample into stories
       catLog('Tracking clonal evolution in CNVs..')
-      cnvStories = getCNVstories(cnvs[ts], normals[ts], filter=T)
+      cnvStories = getCNVstories(cnvs[ts], normals[ts], genome, filter=T)
       catLog('Keeping', nrow(cnvStories), 'CNV stories.\n')
 
       #merge SNV and CNA stories.
@@ -67,7 +67,7 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, normals, Rdire
       somaticQs = lapply(qs, function(q) q[somatic,])
       filteredSnpStories = findSNPstories(somaticQs, cnvs[ts], normals[ts], filter=F)
       filteredSnpStories = filteredSnpStories[!(rownames(filteredSnpStories) %in% snpStories),]
-      filteredCnvStories = getCNVstories(cnvs[ts], normals[ts], filter=F)
+      filteredCnvStories = getCNVstories(cnvs[ts], normals[ts], genome, filter=F)
       filteredCnvStories = filteredCnvStories[!(rownames(filteredCnvStories) %in% cnvStories),]
       
       filteredStories = combineStories(filteredSnpStories, filteredCnvStories)
@@ -337,12 +337,12 @@ frequencyError = function(var, cov, p0=0.15, reportBothEnds=F) {
   return(error)
 }
 
-getCNVstories = function(cnvs, normal, filter=T) {
+getCNVstories = function(cnvs, normal, genome, filter=T) {
   regions = splitRegions(cnvs)
   catLog(nrow(regions), ' regions..', sep='')
   events = splitEvents(cnvs, regions)
   catLog(nrow(regions), ' events.\nExtracting stories..', sep='')
-  stories = cnvsToStories(cnvs, events, normal, filter=filter)
+  stories = cnvsToStories(cnvs, events, normal, genome, filter=filter)
   return(stories)
 }
 
@@ -373,7 +373,7 @@ splitEvents = function(cnvs, regions) {
   return(events)
 }
 
-cnvsToStories = function(cnvs, events, normal, filter=T) {
+cnvsToStories = function(cnvs, events, normal, genome, filter=T) {
   stories = errors = data.frame(stringsAsFactors=F)
   if ( nrow(events) > 0 ) {
     i=1
@@ -402,7 +402,7 @@ cnvsToStories = function(cnvs, events, normal, filter=T) {
   }
   colnames(errors) = colnames(stories) = names(cnvs)
   ret = events
-  rownames(ret) = make.names(paste0('chr', xToChr(ret$x1), '-', events$call), unique=T)
+  rownames(ret) = make.names(paste0('chr', xToChr(ret$x1, genome), '-', events$call), unique=T)
   ret$stories = as.matrix(stories)
   ret$errors = as.matrix(errors)
   ret$errors[is.na(ret$errors)] = 1

@@ -3,7 +3,7 @@
 #flags variants with suspicious behaviour in the normals.
 #marks the somatic-looking variants in the samples
 #ie non-db variants that are not present in the normals and not flagged as suspicious.
-matchFlagVariants = function(variants, normalVariants, individuals, normals, Rdirectory, cpus=1, forceRedoMatchFlag=F) {
+matchFlagVariants = function(variants, normalVariants, individuals, normals, genome, Rdirectory, cpus=1, forceRedoMatchFlag=F) {
   saveFile = paste0(Rdirectory, '/allVariants.Rdata')
   if ( file.exists(saveFile) & !forceRedoMatchFlag ) {
     catLog('Loading final version of combined variants.\n')
@@ -17,6 +17,10 @@ matchFlagVariants = function(variants, normalVariants, individuals, normals, Rdi
   variants = matchVariants(variants, normalVariants)
   normalVariants = matchVariants(normalVariants, variants)
 
+  #Normalise coverage to the number of available reads. Assumes minor variants are noise.
+  variants$variants = normaliseCoverage(variants$variants)
+  normalVariants$variants = normaliseCoverage(normalVariants$variants)
+
   #remove boring variants
   present = rowsums(sapply(variants$variants, function(q) q$var > q$cov*0.05)) > 0
   catLog('Keeping ', sum(present), ' out of ', length(present),
@@ -26,7 +30,7 @@ matchFlagVariants = function(variants, normalVariants, individuals, normals, Rdi
   variants$SNPs = normalVariants$SNPs = variants$SNPs[variants$SNPs$x %in% variants$variants[[1]]$x,]
 
   #Use the normals to flag variants that are noisy in the normals
-  variants = flagFromNormals(variants, normalVariants, cpus=cpus)
+  variants = flagFromNormals(variants, normalVariants, genome, cpus=cpus)
 
   #mark somatic variants
   variants = markSomatics(variants, normalVariants, individuals, normals, cpus=cpus)
@@ -110,7 +114,7 @@ return(qs)
 
 
 #helper function that flags variants that have suspicious behaviour in the pool of normals.
-flagFromNormals = function(variants, normalVariants, cpus=1) {
+flagFromNormals = function(variants, normalVariants, genome, cpus=1) {
   #check normals for recurring noise.
   setVariantLoss(normalVariants$variants)
   varN = do.call(cbind, lapply(normalVariants$variants, function(q) q$var))
@@ -417,3 +421,14 @@ mirrorDown = function(var, cov, vL=variantLoss()) {
 }
 
 
+normaliseCoverage = function(qs) {
+  catLog('Flagging variants with large minor variants: ')
+  qs = lapply(qs, function(q) {
+    largeMinorVariant = q$cov < 0.8*(q$ref + q$var)
+    catLog(sum(largeMinorVariant), '..')
+    q$flag[largeMinorVariant] = paste0(q$flag[largeMinorVariant], 'Lmv')
+    q$cov = q$ref + q$var
+    return(q)
+  })
+  return(qs)
+}
