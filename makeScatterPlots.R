@@ -168,9 +168,9 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
   if ( !plotPosition & doPlot ) {
     if ( legend & !add ) {
       if ( plotFlagged )
-        legend('bottomright', c('clean non-db', 'flagged non-db', 'clean germline-like non-db', 'clean db', 'flagged db', 'significantly different', 'high coverage', 'low coverage', 'severe effect', 'COSMIC Census Variant'), pch=c(19, 1, 3, 4, 4, 19, 19, 19, 1, 1), col=c('blue', 'grey', 'blue', 'black', 'grey', 'red', 'black', 'black', 'orange', 'green'), pt.cex=c(1,1,1,1,1,1,1,0.3, 1.5, 2), pt.lwd=c(1,1,1,1,1,1,1,1, 2, 4), bg='white')
+        legend('bottomright', c('clean non-db', 'flagged non-db', 'clean germline-like non-db', 'clean db', 'flagged db', 'significantly different', 'high coverage', 'low coverage', 'protein altering', 'COSMIC Census Variant'), pch=c(19, 1, 3, 4, 4, 19, 19, 19, 1, 1), col=c('blue', 'grey', 'blue', 'black', 'grey', 'red', 'black', 'black', 'orange', 'green'), pt.cex=c(1,1,1,1,1,1,1,0.3, 1.5, 2), pt.lwd=c(1,1,1,1,1,1,1,1, 2, 4), bg='white')
       else
-        legend('bottomright', c('not in dbSNP', 'in dbSNP', 'germline-like non-db', 'significantly different', 'low coverage', 'severe effect', 'COSMIC Census Variant'), pch=c(19, 4, 3, 19, 19, 1, 1), col=c('blue', 'black', 'blue', 'red', 'black', 'orange', 'green'), pt.cex=c(1,1,1,1,0.3, 1.5, 2), pt.lwd=c(1,1,1,1,1, 2, 4), bg='white')
+        legend('bottomright', c('not in dbSNP', 'in dbSNP', 'germline-like non-db', 'significantly different', 'low coverage', 'protein altering', 'COSMIC Census Variant'), pch=c(19, 4, 3, 19, 19, 1, 1), col=c('blue', 'black', 'blue', 'red', 'black', 'orange', 'green'), pt.cex=c(1,1,1,1,0.3, 1.5, 2), pt.lwd=c(1,1,1,1,1, 2, 4), bg='white')
     }
     points(freq1[!clean&use], freq2[!clean&use], cex=cex[!clean&use],
            lwd=pmin(maxCex, sqrt(sqrt(q1$cov*q2$cov)[!clean&use]/covScale)), pch=pch[!clean&use], col=col[!clean&use])

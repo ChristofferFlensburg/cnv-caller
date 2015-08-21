@@ -211,7 +211,7 @@ importEnsemblData = function(x, saveDirectory, genome, verbose=T) {
 
       while(length(chr) > maxLength) {
         if ( verbose ) catLog('.')
-        moreBm = getBM(attributes=c('chromosome_name', 'start_position', 'end_position', 'hgnc_symbol', 'ensembl_transcript_id', 'gene_biotype', 'hsapiens_paralog_ensembl_gene', 'hsapiens_paralog_chrom_start'), filters = c('chromosome_name', 'start', 'end'),
+        moreBm = getBM(attributes=c('chromosome_name', 'start_position', 'end_position', 'hgnc_symbol', 'ensembl_transcript_id', 'gene_biotype'), filters = c('chromosome_name', 'start', 'end'),
           value=list(chr[1:maxLength], pos[1:maxLength]-1000, pos[1:maxLength]+1000), mart=mart)
         chr = chr[-(1:maxLength)]
         pos = pos[-(1:maxLength)]
