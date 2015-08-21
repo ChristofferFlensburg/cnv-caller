@@ -142,6 +142,10 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
     red[is.na(red)] = 0
     warning('Got NA red colour in scatter.')
   }
+  if ( any(is.na(db)) ) {
+    db[is.na(db)] = 0
+    warning('Got NA sb in scatter.')
+  }
 
   use = q1$cov >= minCov & q2$cov >= minCov
   if ( any(is.na(use)) ) {

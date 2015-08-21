@@ -25,6 +25,7 @@ runVEP = function(variants, plotDir, cpus=1, genome='hg19', forceRedoVEP=F) {
         next
       }
       call = paste0('vep -i ', basename(infile), ' -o ', basename(VEPfile), ' --everything --force_overwrite --fork ', cpus)
+      if ( genome == 'mm10' ) call = paste0(call, ' --species mus_musculus')
       catLog(call, '\n')
       systemRet = system(call, intern=T)
       if ( !any(grepl('Finished', systemRet)) ) warning('VEP run didnt finish!')
@@ -81,8 +82,8 @@ runVEP = function(variants, plotDir, cpus=1, genome='hg19', forceRedoVEP=F) {
         sevI = sev[i] - polyPhen[i]
         IDI = ID[i]
         if ( sevI < sevScore[IDI] ) {
-          sevScore[IDI] = sevI - polyPhen[i]
-          mostSev[IDI] = severityToType(sevI)
+          sevScore[IDI] = sevI
+          mostSev[IDI] = severityToType(round(sevI + polyPhen[i]))
         }
       }
       
@@ -238,7 +239,7 @@ postAnalyseVEP = function(outputDirectories, inputFiles, genome='hg19', cpus=1, 
   allVariantSaveFile = paste0(Rdirectory, '/allVariants.Rdata')
   save('allVariants', file=allVariantSaveFile)
 
-  variants = getMoreVEPinfo(variants, plotDirectory, cosmicDirectory=cosmicDirectory)
+  variants = getMoreVEPinfo(variants, plotDirectory, genome, cosmicDirectory=cosmicDirectory)
   makeScatterPlots(variants, samplePairs, timePoints, plotDirectory, genome=genome, cpus=cpus, forceRedo=T)
   outputNewVariants(variants, samplePairs, genome, plotDirectory, cpus=cpus, forceRedo=T)
   outputSomaticVariants(variants, genome, plotDirectory, cpus=cpus, forceRedo=T)
@@ -254,7 +255,7 @@ postAnalyseVEP = function(outputDirectories, inputFiles, genome='hg19', cpus=1, 
 #'
 #' @details Extract almost all the information from the VEP run, and cross-checks with COSMIC data as well.
 #'          getCosmicCounts is called by this function, see details of that for requirements.
-getMoreVEPinfo = function(variants, plotDirectory, cosmicDirectory='') {
+getMoreVEPinfo = function(variants, plotDirectory, genome='hg19', cosmicDirectory='') {
   dir = paste0(plotDirectory, '/somatics')
   catLog('Importing more VEP info:\n')
   for ( name in names(variants$variants) ) {
@@ -275,7 +276,7 @@ getMoreVEPinfo = function(variants, plotDirectory, cosmicDirectory='') {
       var = as.character(VEPdata$V3)
       type = as.character(VEPdata$V7)
       sev = sapply(type, typeToSeverity)
-      x = chrToX(chr, as.numeric(pos))
+      x = chrToX(chr, as.numeric(pos), genome)
       AApos = VEPdata$V10
       AAbefore = gsub('\\/.*$', '', VEPdata$V11)
       AAafter = gsub('^.*\\/', '', VEPdata$V11)
@@ -412,8 +413,8 @@ moreVEPnames = function() c('polyPhen', 'sift', 'exon', 'AApos', 'AAbefore', 'AA
 getCosmicCounts = function(cosmic, cosmicDirectory='/wehisan/general/academic/grp_leukemia_genomics/data/resources/COSMIC', onlyCensus=T) {
   if ( cosmicDirectory == '' ) {
     warning('COSMIC directory not specified. To access more cosmic data, download CosmicMutantExportCensus.tsv and CosmicMutantExport.tsv from cosmic, put them in a directory (dont change the names of the files please), and provide the directory to postAnalyseVEP, getMoreVEPinfo or getCosmicCounts.')
-    return(list(cosmic=cosmic, found=rep(NA, length(cosmic)),
-                variantDensity=rep(NA, length(cosmic)), geneDensity=rep(NA, length(cosmic))))
+    return(list(cosmic=cosmic, found=rep(F, length(cosmic)),
+                variantDensity=rep(0, length(cosmic)), geneDensity=rep(0, length(cosmic))))
   }
   
   if ( onlyCensus ) countsFile = paste0(cosmicDirectory, '/cosmicCounts.Rdata')

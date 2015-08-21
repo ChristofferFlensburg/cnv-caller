@@ -23,7 +23,8 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, normals, genom
       somaticQs = lapply(qs, function(q) q[somatic,])
 
       #switch to effective coverage, to not overestimate the accuracy of high-coverage SNPs
-      mC = maxCov()
+      #not too low though, keep at least 100.
+      mC = max(100, maxCov())
       somaticQs = lapply(somaticQs, function(q) {
         d = q$cov
         effectiveCov = round(d*(1 + d/mC)/(1 + d/mC + d^2/mC^2))
@@ -341,7 +342,7 @@ getCNVstories = function(cnvs, normal, genome, filter=T) {
   regions = splitRegions(cnvs)
   catLog(nrow(regions), ' regions..', sep='')
   events = splitEvents(cnvs, regions)
-  catLog(nrow(regions), ' events.\nExtracting stories..', sep='')
+  catLog(nrow(regions), ' events.\nExtracting stories, comparing SNP shift directions..', sep='')
   stories = cnvsToStories(cnvs, events, normal, genome, filter=filter)
   return(stories)
 }
