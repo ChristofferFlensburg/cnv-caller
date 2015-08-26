@@ -381,16 +381,14 @@ setVariantLoss = function(variants, maxLoops = 99, verbose=T) {
     }
   }
   if ( variantLoss() > 0.25 ) {
-    warning('Variant loss estimated to above 25%, which is suspiciously high. Will not correct for reference bias.\n')
     if ( verbose ) catLog('Variant loss estimated to above 25%, which is suspiciously high. Will not correct for reference bias.\n')
     assign('.variantLoss', 0, envir = .GlobalEnv)
   }
-    if ( variantLoss() < 0 ) {
-    warning('Variant loss estimated to be negative, which is not realistic. Will not correct for reference bias.\n')
+  if ( variantLoss() < 0 ) {
     if ( verbose ) catLog('Variant loss estimated to be negative, which is not realistic. Will not correct for reference bias.\n')
     assign('.variantLoss', 0, envir = .GlobalEnv)
   }
-
+  
   return(.variantLoss)
 }
 

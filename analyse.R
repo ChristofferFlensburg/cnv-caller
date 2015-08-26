@@ -366,7 +366,7 @@ analyse = function(inputFiles, outputDirectories, settings, forceRedo, runtimeSe
   catLog('\n##################################################################################################\n\n')
 
   #compare coverage of samples to the pool of normals, using limma-voom.
-  fit = try(runDE(bamFiles, names, externalNormalCoverageBams, captureRegions, Rdirectory, plotDirectory,
+  fit = try(runDE(bamFiles, names, externalNormalCoverageBams, captureRegions, Rdirectory, plotDirectory, genome=genome,
     normalCoverageRdirectory, settings=settings, cpus=cpus, forceRedoFit=forceRedoFit, forceRedoCount=forceRedoCount,
     forceRedoNormalCount=forceRedoNormalCount))
   if ( class(fit) == 'try-error' ) {
@@ -550,8 +550,8 @@ loadData = function(Rdirectory, setVariantLoss=F) {
   names = gsub('.Rdata$', '', basename(saveFiles))
   #if allVariants is done, some of the earlier data doesnt have to be loaded.
   if ( 'allVariants' %in% names ) {
-    saveFiles = saveFiles[!(names %in% c('variants', 'normalVariants', 'SNPs'))]
-    names = names[!(names %in% c('variants', 'normalVariants', 'SNPs'))]
+    saveFiles = saveFiles[!(names %in% c('variants', 'normalVariants', 'SNPs', 'allVariantsPreVEP'))]
+    names = names[!(names %in% c('variants', 'normalVariants', 'SNPs', 'allVariantsPreVEP'))]
   }
   if ( 'fit' %in% names ) {
     saveFiles = saveFiles[!(names %in% c('fitP'))]

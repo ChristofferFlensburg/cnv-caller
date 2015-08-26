@@ -15,8 +15,8 @@ makeRiverPlots = function(stories, variants, genome, cpus=1, plotDirectory, forc
     heatmapStories(stories[[ts]]$all, stories[[ts]]$clusters$storyList, variants$SNPs, labels=do.call(c, labels), genome=genome)
     for ( subclone in names(stories[[ts]]$clusters$storyList) ) {
       i = which(names(stories[[ts]]$clusters$storyList) == subclone)
-      plotStories(stories[[ts]]$all[stories[[ts]]$clusters$storyList[[subclone]],], variants$SNPs, alpha=0.2)
-      plotStories(stories[[ts]]$clusters$cloneStories[i,], variants$SNPs, add=T, col=cloneCols[i])
+      plotStories(stories[[ts]]$all[stories[[ts]]$clusters$storyList[[subclone]],], variants$SNPs, alpha=0.2, genome=genome)
+      plotStories(stories[[ts]]$clusters$cloneStories[i,], variants$SNPs, add=T, col=cloneCols[i], genome=genome)
     }
     dev.off()
     catLog('done.\n')

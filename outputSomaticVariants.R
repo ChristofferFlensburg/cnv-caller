@@ -5,6 +5,7 @@ outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, for
   outfile = paste0(plotDirectory, '/somaticVariants.xls')
   if ( (!file.exists(outfile) | forceRedo) ) {
     somatics = list()
+    XLsomatics = list()
     catLog('Printing somatic variants to ', outfile, '.\n', sep='')
     for ( sample in names(variants$variants) ) {
       catLog(sample, '..', sep='')
@@ -26,7 +27,7 @@ outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, for
       }
       if ( any(grepl('\\+', variant)) ) {
         nIns = nchar(variant[grepl('\\+', variant)])-1
-        variant[grepl('\\+', variant)] = paste0(reference[grepl('\\+', variant)], gsub('\\+', '', variant[grepl('\\+', variant)]))
+        variant[grepl('\\+', variant)] = paste0(substr(reference[grepl('\\+', variant)], 1, 1), gsub('\\+', '', variant[grepl('\\+', variant)]))
       }
 
       somatic = data.frame(
@@ -60,9 +61,11 @@ outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, for
       else ord = order(10*q$germline)
       somatic = somatic[ord,]
       somatics[[sample]] = somatic
+      if ( nrow(somatic) > 65000 ) warning('Truncating .xls somatic variants: too many rows.')
+      XLsomatics[[sample]] = somatic[1:min(nrow(somatic), 65000),]
     }
     catLog('writing to xls...')
-    WriteXLS('somatics', outfile)
+    WriteXLS('XLsomatics', outfile)
     catLog('done!\n')
 
     vcfDir = paste0(plotDirectory, '/somatics')

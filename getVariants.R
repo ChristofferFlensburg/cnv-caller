@@ -108,7 +108,7 @@ getVariants = function(vcfFiles, bamFiles, names, captureRegions, genome, BQoffs
                breaks=(0:100)/100, col=mcri('blue'), main='clean Variants',
                xlab='variant frequency', ylab='number of variants')
         }
-        cleanDbUse = cleanUse & normalVariants[[sample]]$db
+        cleanDbUse = cleanUse & variants[[sample]]$db
         if ( any(cleanDbUse) ) {
           hist((variants[[sample]]$var/variants[[sample]]$cov)[cleanDbUse],
                breaks=(0:100)/100, col=mcri('blue'), main='clean dbSNP Variants',

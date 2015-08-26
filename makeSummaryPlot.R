@@ -127,7 +127,7 @@ plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome,
   names(geneCounts) = allGenes
   i = 0
   print = allGenes[geneCounts > i]
-  while( length(print) > 30 & sum(geneCounts > i+1) > 5 ) {
+  while( length(print) > 50 & sum(geneCounts > i+1) > 5 ) {
     i = i+1
     print = allGenes[geneCounts > i]
   }
@@ -152,7 +152,7 @@ plotSummary = function(variants, cnvs, normals, individuals, timePoints, genome,
     geneX = sapply(print, function(gene) mean(variants$SNPs$x[variants$SNPs$inGene == gene]))
     x = sort(geneX)
     #textX = seq(from=xmin, to=xmax, along.with=print)
-    textX = -spreadPositions(-x, xmax/50)
+    textX = -spreadPositions(-x, (xmax-xmin)/50)
     textY = rep(c(-0.55, -0.85, -1.15, -1.45), length(print))[1:length(print)] - 0.2
     segments(textX, textY+0.2, x, -0.1, col=rgb(0.8, 0.8, 0.8))
     label = paste0(print, ' (', geneCounts[print], ')')
