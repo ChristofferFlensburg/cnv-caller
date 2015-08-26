@@ -55,7 +55,7 @@ runVEP = function(variants, plotDir, cpus=1, genome='hg19', forceRedoVEP=F) {
       variants$variants[[name]]$severity = rep(100, nrow(variants$variants[[name]]))
     }
     else {
-      ID = as.numeric(as.character(VEPdata$V1))
+      ID = as.numeric(as.factor(VEPdata$V1))
       chr = sapply(strsplit(as.character(VEPdata$V2), ':'), function(v) v[1])
       pos = sapply(strsplit(as.character(VEPdata$V2), ':'), function(v) v[2])
       end = gsub('^.*-', '',pos)
@@ -272,7 +272,7 @@ getMoreVEPinfo = function(variants, plotDirectory, genome='hg19', cosmicDirector
       next
     }
     else {
-      ID = as.numeric(as.character(VEPdata$V1))
+      ID = as.numeric(as.factor(VEPdata$V1))
       chr = sapply(strsplit(as.character(VEPdata$V2), ':'), function(v) v[1])
       pos = sapply(strsplit(as.character(VEPdata$V2), ':'), function(v) v[2])
       end = gsub('^.*-', '',pos)
