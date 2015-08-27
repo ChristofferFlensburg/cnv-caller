@@ -158,7 +158,7 @@ vcfToPositions = function(files, genome='hg19') {
     start = as.numeric(as.character(raw$V2[use])),
     end = as.numeric(as.character(raw$V2[use])),
     x = chrToX(chrs[use], as.numeric(as.character(raw$V2[use])), genome=genome),
-    reference = raw$V4[use],
+    reference = substr(as.character(raw$V4[use]), 1, 1),
     variant = variant, stringsAsFactors=F)
   
   ret = ret[!duplicated(ret$x),]
