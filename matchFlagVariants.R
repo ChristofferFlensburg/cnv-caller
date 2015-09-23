@@ -130,7 +130,7 @@ flagFromNormals = function(variants, normalVariants, genome, cpus=1) {
   pSameF = apply(psN, 1, fisherTest)[2,]
   non0 = f > 0.03 & rowsums(varN) > 1
   isLow = fs < 0.1
-  isHigh = fs > 0.9
+  isHigh = fs > 0.95
   isHalf = matrix(pBinom(as.integer(covN), as.integer(varN), rep(refBias(0.5), nrow(covN)*ncol(covN))), ncol=ncol(covN)) > 0.01
   consistent = rowsums(isLow | isHigh | isHalf) == ncol(fs)   #are all samples 0, 0.5 or 1?
   normalNoise = (!db & non0 & pSameF > 0.01) | (db & non0 & pSameF > 0.01 & !consistent)

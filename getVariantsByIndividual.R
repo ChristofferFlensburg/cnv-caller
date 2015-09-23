@@ -136,12 +136,17 @@ getVariantsByIndividual = function(metaData, captureRegions, genome, BQoffset, d
 
 
 #helper function that imports the variants from a vcf file.
+#takes a vector of vcf files as input, and outputs a data frame with
+#chromosome, start, end, x (genomic coordinate), reference, variant and gene
+#for each position. Duplicated positions are removed, and positions that fails to
+#align with an ensembl gene is marked with '?'.
 vcfToPositions = function(files, genome='hg19') {
   #if more than one file, call each file separately and rbind the outputs.
   if ( length(files) > 1 ) {
     catLog('Found', length(files), 'files.', '\n')
     ret = do.call(rbind, lapply(files, function(file) vcfToPositions(file, genome=genome)))
     ret = ret[!duplicated(ret$x),]
+    ret = ret[order(ret$x),]
     return(ret)
   }
 
@@ -160,8 +165,11 @@ vcfToPositions = function(files, genome='hg19') {
     x = chrToX(chrs[use], as.numeric(as.character(raw$V2[use])), genome=genome),
     reference = substr(as.character(raw$V4[use]), 1, 1),
     variant = variant, stringsAsFactors=F)
+
+  ret[ret$variant == ret$reference,]$variant = '-1'
   
   ret = ret[!duplicated(ret$x),]
+  ret = ret[order(ret$x),]
   
   rownames(ret) = ret$x
   catLog('done.\n')
@@ -512,6 +520,7 @@ QCsnps = function(pileups, positions, cpus=10) {
     return(QCsnp(pileups[[i]], references[i], xs[i], variant='', defaultVariant=variants[i]))
   }, mc.cores=cpus)
   ret = mergeVariantList(ret)
+  ret = ret[ret$reference != ret$variant,]
   rownames(ret) = paste0(ret$x, ret$variant)
   catLog('done.\n')
   catLog('Variants:', nrow(ret), '\n')
