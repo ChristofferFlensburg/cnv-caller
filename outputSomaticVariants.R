@@ -66,6 +66,13 @@ outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, for
     }
     catLog('writing to xls...')
     WriteXLS('XLsomatics', outfile)
+
+    catLog('Writing to .csv...')
+    for ( sample in names(somatics) ) {
+      somatics[[sample]]$sample = sample
+    }
+    allSomatics = do.call(rbind, somatics)
+    write.csv(allSomatics, gsub('.xls$', '.csv', outfile))
     catLog('done!\n')
 
     vcfDir = paste0(plotDirectory, '/somatics')

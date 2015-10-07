@@ -1,8 +1,11 @@
 
-#Takes a set of vcf files and corresponding bam files and capture regions.
-#The function filters variants outside of the capture regions, and a few other filters.
-#The function the checks the variants in the bamfiles, and flags if the variant seems suspicious.
-#Outputs a data frame for each sample with variant and reference counts, as well as some quality information.
+#Takes genomic positions from vcfs files and checks them up in the bam files of the samples.
+#input:
+#metaData: a path to the metaData.txt file, which is a tab-separated file with columns BAM, NAME and VCF amongst others. These columns are the paths to the vcfs and bams that will be linked to the sample with name NAME.
+#captureRegions: a GRanges object of the unpadded capture regions. Variants more than 300 bp away from a capture regions are discarded.
+#genome: the genome of the bam and vcf files. such as "hg19" or "mm10".
+#BQoffset: the base quality offset in the quality string of the bams. 33 is standard for most sequencers.
+#dbDir: path to where the dbSNP information is stored.
 getVariantsByIndividual = function(metaData, captureRegions, genome, BQoffset, dbDir, Rdirectory, plotDirectory, cpus, forceRedo=F) {
   catLog('Using variants by individual.\n')
   saveFile = paste0(Rdirectory, '/variantsBI.Rdata')
@@ -99,6 +102,8 @@ getVariantsByIndividual = function(metaData, captureRegions, genome, BQoffset, d
   for ( sample in names(variantsBI$variants) ) {
     catLog(sample, '..', sep='')
     use = variantsBI$variants[[sample]]$cov > 0
+    cov = normalVariantsBI$variants[[sample]]$cov[use] - 0.2 + noneg(rnorm(sum(use), 0, 0.2)+0.2)
+    var = normalVariantsBI$variants[[sample]]$var[use] - 0.2 + noneg(rnorm(sum(use), 0, 0.2)+0.2)
     png(paste0(FreqDirectory, sample, '-varcov.png'), height=2000, width=4000, res=144)
     plotColourScatter((variantsBI$variants[[sample]]$var/variantsBI$variants[[sample]]$cov)[use],
                       variantsBI$variants[[sample]]$cov[use],
@@ -166,7 +171,8 @@ vcfToPositions = function(files, genome='hg19') {
     reference = substr(as.character(raw$V4[use]), 1, 1),
     variant = variant, stringsAsFactors=F)
 
-  ret[ret$variant == ret$reference,]$variant = '-1'
+  if ( any(ret$variant == ret$reference) )
+    ret[ret$variant == ret$reference,]$variant = '-1'
   
   ret = ret[!duplicated(ret$x),]
   ret = ret[order(ret$x),]
@@ -252,7 +258,7 @@ matchTodbSNPs = function(variants, dir='~/data/dbSNP', genome='hg19') {
 
 #helper functions that counts reads in favour of reference and any present variant
 #at the given locations for the given bam files.
-importQualityScores = function(positions, files, BQoffset, genome='hg19', cpus=10) {
+importQualityScores = function(positions, files, BQoffset, genome='hg19', cpus=1) {
   ret=list()
   chr = as.character(positions$chr)
   if ( genome == 'mm10' ) chr = paste0('chr', chr)
@@ -278,19 +284,23 @@ importQualityScores = function(positions, files, BQoffset, genome='hg19', cpus=1
 }
 getQuality = function(file, chr, pos, BQoffset, cpus=1) {
   catLog(chr[1], '.. ', sep='')
+  if ( all(grepl('^chr', names(scanBamHeader(file)[[1]]$targets))) )
+    chr = paste0('chr', chr)
   which = GRanges(chr, IRanges(pos-3, pos+3))
+  chr = gsub('chr', '', chr)
   p1 = ScanBamParam(which=which, what=c('pos', 'seq', 'cigar', 'qual', 'mapq', 'strand'),
     flag=scanBamFlag(isSecondaryAlignment=FALSE))
   index = paste0(file, '.bai')
   if ( !file.exists(index) ) {
     index = gsub('.bam$', '.bai', file)
-    if ( !file.exists(index) )
+    if ( !file.exists(index) ) {
+      catLog('Could not find an index file for', file, '\nI want either', paste0(file, '.bai'), 'or', index)
       stop(paste('Could not find an index file for', file, '\nI want either', paste0(file, '.bai'), 'or', index))
+    }
   }
   regionReads = scanBam(file, index=index, param=p1)
-  before = sum(sapply(regionReads, function(reads) length(reads$mapq)))
   regionReads = lapply(regionReads, function(reads) {
-    keep = reads$mapq > 0 & !is.na(reads$mapq)
+    keep = !is.na(reads$mapq)
     if ( length(keep) == 0 ) return(reads)
     if ( sum(!keep) > 0 ) {
       reads$pos = reads$pos[keep]
@@ -302,7 +312,6 @@ getQuality = function(file, chr, pos, BQoffset, cpus=1) {
     }
     return(reads)
   })
-  after = sum(sapply(regionReads, function(reads) length(reads$mapq)))
   if ( cpus > 1 )
     pileups = mclapply(1:length(pos), function(i) {
       return(readsToPileup(regionReads[[i]], pos[i], BQoffset=BQoffset))}, mc.cores=cpus)
@@ -582,10 +591,10 @@ QCsnp = function(pileup, reference, x, variant='', defaultVariant='') {
 
   flag = ''
   
-  #check for mapQ 0 or 1, if present, flag as repeat region.
+  #check for mapQ 0 or 1, if too many, flag as repeat region.
   #then remove those reads.
   if ( any(pileup$mapq < 2) ) {
-    if ( sum(pileup$mapq < 2)/nrow(pileup) > 0.1 )
+    if ( sum(pileup$mapq < 2)/nrow(pileup) > 0.5 )
       flag = paste0(flag, 'Rep')
     pileup = pileup[pileup$mapq > 1,]
     ref = pileup$call == reference
@@ -760,8 +769,8 @@ getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, 
   for ( sample in names(normalVariantsBI$variants) ) {
     catLog(sample, '..', sep='')
     use = normalVariantsBI$variants[[sample]]$cov > 0
-    cov = normalVariantsBI$variants[[sample]]$cov[use] + 0.2 + noneg(rnorm(sum(use), 0, 0.2)-0.2)
-    var = normalVariantsBI$variants[[sample]]$var[use] + 0.2 + noneg(rnorm(sum(use), 0, 0.2)-0.2)
+    cov = normalVariantsBI$variants[[sample]]$cov[use] - 0.2 + noneg(rnorm(sum(use), 0, 0.2)+0.2)
+    var = normalVariantsBI$variants[[sample]]$var[use] - 0.2 + noneg(rnorm(sum(use), 0, 0.2)+0.2)
     png(paste0(FreqDirectory, sample, '-varcov.png'), height=10, width=20, res=144, unit='in')
     plotColourScatter(pmin(1,var/cov), cov, log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
     dev.off()

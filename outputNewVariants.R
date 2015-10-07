@@ -53,7 +53,7 @@ newVariants = function(q1, q2, SNPs, genome, cpus=1, ps=NA) {
       rep('na', nrow(q1[toReturn,]))
   effect =
     if ( 'type' %in% names(q1) & 'type' %in% names(q2) )
-      ifelse(q1$type[toReturn] == 'notChecked', q2$type[toReturn], q1$type[toReturn])
+      ifelse(q1$severity[toReturn] == 100, q2$type[toReturn], q1$type[toReturn])
     else
       rep('na', nrow(q1[toReturn,]))
   ret = data.frame(

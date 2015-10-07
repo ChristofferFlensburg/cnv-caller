@@ -49,7 +49,7 @@ makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, ge
       catLog('done!\n  Plotting chr:')
       for ( chr in names(chrLengths(genome)) ) {
         outfile = paste0(dir2, '/chr', chr, '.png')
-        png(outfile, width = 10, height=10, res=300, units='in')
+        png(outfile, width = 10, height=10, res=144, units='in')
         catLog(chr, '..', sep='')
         use = chrs == chr
         qualityScatter(q1[use,], q2[use,], variants$SNPs, ps=ps[use],

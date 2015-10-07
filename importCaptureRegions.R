@@ -134,6 +134,8 @@ nameCaptureRegions = function(inFile, outFile, Rdirectory, genome='hg19') {
 
   use = chr %in% names(chrLengths(genome))
   if ( sum(!use) > 10 ) warning(paste0(sum(!use), ' rows in the capture region file does not match a chromosome in the genome ', genome, 'will use the remaining ', sum(use), 'rows.'))
+  catLog('Removing mitohondrial regions from the analysis.\n')
+  use = use & !(chr %in% c('M', 'MT'))
   if ( sum(use) == 0 ) stop('No rows in the capture regions start with a chromosome name. Aborting, sorry.')
   chr = as.character(chr[use])
   start = as.numeric(start[use])
