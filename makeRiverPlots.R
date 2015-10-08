@@ -277,7 +277,7 @@ heatmapStories = function(stories, storyList, SNPs, labels=NA, genome='hg19') {
   rownames(clon) = labels
 
 
-  if ( nrow(clon) < 1000 )
+  if ( nrow(clon) < 20000 )
     makeHeatmap(clon, RowSideColors=sideCol, label='clonality')
   else {
     catLog('Too many stories for the built-in heatmap clustering, using default row ordering.\n')

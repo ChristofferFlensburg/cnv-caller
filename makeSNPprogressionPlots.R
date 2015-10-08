@@ -95,12 +95,12 @@ qualityProgression = function(qs, SNPs, normal, db=T, nondb=T, excelFile='', mai
     rG = unique(gene[isRecurringGene])
     names(rGcol) = rG
     Rowv = NULL
-    if ( sum(doColour) > 1000 ) Rowv = NA
+    if ( sum(doColour) > 20000 ) Rowv = NA
     RSC = ifelse(gene[doColour] %in% rG, rGcol[gene[doColour]], 'grey')
     fs[fs==-0.02] = NA
     clusterOrder =
       makeHeatmap(fs[doColour,,drop=F], cexCol=1, labRow=gene[doColour], Rowv=Rowv,
-                  RowSideColors = RSC, margins=c(8,15), main=main, , label='frequency')
+                  RowSideColors = RSC, margins=c(8,15), main=main, label='frequency')
     fs[is.na(fs)] = -0.02
     if ( length(rG) > 0 ) {
       legend('right', rG, col = rGcol, lwd=10, bg='white')
@@ -128,8 +128,8 @@ qualityProgression = function(qs, SNPs, normal, db=T, nondb=T, excelFile='', mai
         'reference'=qs[[1]]$reference[doColour],
         'variant'=qs[[1]]$variant[doColour],
         'f'=fs[doColour,],
-        'cov'=cov[doColour,],
-        'var'=var[doColour,])
+        'cov'=cov[doColour,clusterOrder[[2]]],
+        'var'=var[doColour,clusterOrder[[2]]])
       
       if ( "severity" %in% names(qs[[1]]) ) {
         severity = do.call(cbind, lapply(qs, function(q) q$severity[doColour]))
