@@ -717,14 +717,14 @@ isAB = function(cluster, efs, sigmaCut=3) {
 
 #the considered calls in the algorithm. (CL is complete loss, ie loss of both alleles.)
 allCalls = function() {
-  return(c('AB', 'A', 'AA', 'AAA', 'AAAA', 'AAB', 'AAAB', 'AAAAB', 'AAAAAB', 'AAAAAAB', 'AABB', 'CL'))
+  return(c('AB', 'A', 'AA', 'AAA', 'AAAA', 'AAB', 'AAAB', 'AAAAB', 'AAAAAB', 'AAAAAAB', 'AABB', 'AAABB', 'CL'))
 }
 
 #returns the prior of a call. Prior is proprotional to 1 divided by the number of removed or added chromosomes.
 #no CNV is given a prior 5 times as high as A and AAB.
 callPrior = function(call) {
   priors = c('AB'=10, 'A'=1, 'AA'=1/2, 'AAA'=1/3, 'AAAA'=1/4, 'AAB'=1, 'AAAB'=1/2, 'AAAAB'=1/3, 'AAAAAB'=1/4, 'AAAAAAB'=1/5,
-    'AABB'=1/2, 'CL'=1/2)
+    'AABB'=1/2, 'AAABB'=1/4, 'CL'=1/2)
   priors = priors/sum(priors)
   if ( call %in% names(priors) ) return(priors[call])
   else return(0.1)
