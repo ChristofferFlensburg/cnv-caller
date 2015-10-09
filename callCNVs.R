@@ -309,6 +309,9 @@ unifyCaptureRegions = function(eFreqs, fit, cpus=1) {
   return(cR)
 }
 
+#this function calculates the alternative frequency by maximising the likelihood.
+#efs should be a data.frame with two entries "cov" and "var" giving the coverage
+#and variance of the SNP. The SNPs should be mirrored down to below 50% frequency.
 alternativeFrequency = function(efs, plot=F) {
   f = (0:200)/200
   rbf = refBias(f)
