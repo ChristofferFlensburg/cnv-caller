@@ -478,7 +478,7 @@ getCosmicCensusDensity = function(cosmicDirectory='/wehisan/general/academic/grp
     if ( !file.exists(cosmicVariantsFile) ) {
       warning(paste0('couldnt find cosmics file at ', cosmicVariantsFile,'. Will return 0 counts for all variants.'))
       return(list(cosmic=cosmic, found=rep(NA, length(cosmic)),
-                  variantDensity=rep(NA, length(cosmic)), geneDensity=rep(NA, length(cosmic))))
+                  variantDensity=rep(NA, length(cosmic)), geneDensity=NA))
     }
     cosmicData = read.table(cosmicVariantsFile, fill=T, sep='\t', header=T)
     variantCounts = table(cosmicData$Mutation.ID)
