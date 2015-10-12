@@ -697,8 +697,8 @@ addCall = function(clusters, eFreqs) {
       }
     }
   }
-  aBitWeird = clusters$sigma > 5 | clusters$clonalityError > clusters$clonality/2 | clusters$pCall < 1e-4
-  veryWeird = clusters$sigma > 10 | clusters$clonalityError > clusters$clonality | clusters$pCall < 1e-8
+  aBitWeird = clusters$sigma > 4 | clusters$clonalityError > clusters$clonality/2 | clusters$pCall < 1e-4
+  veryWeird = clusters$sigma > 8 | clusters$clonalityError > clusters$clonality | clusters$pCall < 1e-8
   clusters$call[aBitWeird] = paste0(clusters$call[aBitWeird], '?')
   clusters$call[veryWeird] = paste0(clusters$call[veryWeird], '?')
   catLog('done!\n')
@@ -723,8 +723,7 @@ allCalls = function() {
   return(c('AB', 'A', 'AA', 'AAA', 'AAAA', 'AAB', 'AAAB', 'AAAAB', 'AAAAAB', 'AAAAAAB', 'AABB', 'AAABB', 'CL'))
 }
 
-#returns the prior of a call. Prior is proprotional to 1 divided by the number of removed or added chromosomes.
-#no CNV is given a prior 5 times as high as A and AAB.
+#returns the prior of a call.
 callPrior = function(call) {
   priors = c('AB'=10, 'A'=1, 'AA'=1/2, 'AAA'=1/3, 'AAAA'=1/4, 'AAB'=1, 'AAAB'=1/2, 'AAAAB'=1/3, 'AAAAAB'=1/4, 'AAAAAAB'=1/5,
     'AABB'=1/2, 'AAABB'=1/4, 'CL'=1/2)
