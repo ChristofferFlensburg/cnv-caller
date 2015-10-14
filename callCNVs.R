@@ -301,11 +301,13 @@ unifyCaptureRegions = function(eFreqs, fit, cpus=1) {
     odsHet = dpHet/(dpHet+dpAlt)
     return(fisherTest(odsHet)[2])
   }))
+  
+  Nsnps = sapply(snps, length)
 
   #relWidth = sqrt(fit$df.total[1]/(fit$df.total[1]-2))
 
   cR = data.frame(x1=fit$x1, x2=fit$x2, M=fit$coefficients[,1], width=fit$coefficients[,1]/fit$t[,1], df=fit$df.total,
-    uniFreq[,1:2], pHet=pHet, pAlt=pAlt, odsHet=odsHet)
+    uniFreq[,1:2], Nsnps=Nsnps, pHet=pHet, pAlt=pAlt, odsHet=odsHet)
   return(cR)
 }
 
@@ -392,6 +394,7 @@ mergeRegions = function(cR, minScore = 0.05, plot=F, debug=F, force=NA) {
     cR$x2[best] = max(cR$x2[best],cR$x2[best+1])
     cR$var[best] = cR$var[best] + cR$var[best+1]
     cR$cov[best] = cR$cov[best] + cR$cov[best+1]
+    cR$Nsnps[best] = cR$Nsnps[best] + cR$Nsnps[best+1]
     cR$M[best] = (cR$M[best]/cR$width[best]^2 + cR$M[best+1]/cR$width[best+1]^2)/(1/cR$width[best]^2+1/cR$width[best+1]^2)
     cR$width[best] = 1/sqrt(1/cR$width[best]^2 + 1/cR$width[best+1]^2)
     cR$pHet[best] = if ( cR$cov[best] > 0 ) stoufferTest(c(cR$pHet[best], cR$pHet[best+1]), c(cR$cov[best], cR$cov[best+1]))[2] else 0.5
@@ -720,13 +723,13 @@ isAB = function(cluster, efs, sigmaCut=3) {
 
 #the considered calls in the algorithm. (CL is complete loss, ie loss of both alleles.)
 allCalls = function() {
-  return(c('AB', 'A', 'AA', 'AAA', 'AAAA', 'AAB', 'AAAB', 'AAAAB', 'AAAAAB', 'AAAAAAB', 'AABB', 'AAABB', 'CL'))
+  return(c('AB', 'A', 'AA', 'AAA', 'AAAA', 'AAB', 'AAAB', 'AAAAB', 'AAAAAB', 'AAAAAAB', 'AABB', 'AAABB', 'AAAABB', 'CL'))
 }
 
 #returns the prior of a call.
 callPrior = function(call) {
   priors = c('AB'=10, 'A'=1, 'AA'=1/2, 'AAA'=1/3, 'AAAA'=1/4, 'AAB'=1, 'AAAB'=1/2, 'AAAAB'=1/3, 'AAAAAB'=1/4, 'AAAAAAB'=1/5,
-    'AABB'=1/2, 'AAABB'=1/4, 'CL'=1/2)
+    'AABB'=1/2, 'AAABB'=1/4, 'AAAABB'=1/5, 'CL'=1/2)
   priors = priors/sum(priors)
   if ( call %in% names(priors) ) return(priors[call])
   else return(0.1)
@@ -903,17 +906,19 @@ sameCNV = function(cR) {
   #can cause different mean MAF. We catch that case by grouping regions that are consistent with 50%, independently of MAF.
   if ( 'postHet' %in% names(cR) ) pBoth50 = sapply(first, function(i) min(p.adjust(c(cR$postHet[i], cR$postHet[i+1]), method='fdr')))
   else pBoth50 = sapply(first, function(i) min(p.adjust(c(cR$pHet[i], cR$pHet[i+1]), method='fdr')))
-  pF = pmax(simesFP, pBoth50)
-  noFreq = cR$cov[first] == 0 | cR$cov[second] == 0
+  Nsnps = pmin(cR$Nsnps[first], cR$Nsnps[second])
+  pF = pmax(simesFP, pBoth50, 0.01^Nsnps)
 
   #find the probability densities (P*dM) of getting measure values if the regions have the same fold change
-  width = cR$width + 0*systematicVariance()
-  meanM = (cR$M[first]/width[first]^2 + cR$M[second]/width[second]^2)/(1/width[first]^2 + 1/width[second]^2)
-  MP1 = pt(-abs(cR$M[first] - meanM)/width[first], df = cR$df[first])
-  MP2 = pt(-abs(cR$M[second] - meanM)/width[second], df = cR$df[second])
-  pM = sapply(first, function(i) min(p.adjust(c(MP1[i], MP2[i]), method='fdr')))
+  width = cR$width
+  #meanM = (cR$M[first]/width[first]^2 + cR$M[second]/width[second]^2)/(1/width[first]^2 + 1/width[second]^2)
+  #MP1 = pt(-abs(cR$M[first] - meanM)/width[first], df = cR$df[first])
+  #MP2 = pt(-abs(cR$M[second] - meanM)/width[second], df = cR$df[second])
+  #pM = sapply(first, function(i) min(p.adjust(c(MP1[i], MP2[i]), method='fdr')))
+  pM = pt(-abs(cR$M[first] - cR$M[second])/sqrt(width[first]^2 + width[second]^2), df = cR$df[first])
 
-  pMandF = sapply(first, function(i) min(p.adjust(c(pF[i], pM[i]), method='fdr')))
+  #pMandF = sapply(first, function(i) min(p.adjust(c(pF[i], pM[i]), method='fdr')))
+  pMandF = sapply(first, function(i) fisherTest(c(pF[i], pM[i]))['pVal'])
 
   #get posteriors, and take average
   post = prior*pMandF/(prior*pMandF + (1-prior))
