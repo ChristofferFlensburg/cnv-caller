@@ -359,7 +359,7 @@ setVariantLoss = function(variants, maxLoops = 99, verbose=T) {
   while(T) {
     loops = loops + 1
     f = refUnbias(rawF)
-    use = !is.na(f) & abs(f-0.5) < 0.3 & variants$flag == '' & pBinom(variants$cov, variants$var, refBias(0.5)) > 0.01
+    use = !is.na(f) & abs(f-0.5) < 0.3 & variants$flag == '' & pBinom(variants$cov, variants$var, refBias(0.5)) > 0.01 & variants$db
     observedMean = sum(variants$var[use])/sum(variants$cov[use])
     if ( sum(use) == 0 ) {
       observedMean = 0.5

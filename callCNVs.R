@@ -334,7 +334,7 @@ alternativeFrequency = function(efs, plot=F) {
 mergeChromosomes = function(cR, eFreqs, genome='hg19', cpus=1, ...) {
   chrs = xToChr(cR$x1, genome=genome)
   breakpoints = pmax(nrow(cR) - length(unique(chrs)), 1)
-  MHTcut = 0.05/breakpoints
+  MHTcut = 1/breakpoints
   
   catLog('Merging capture regions with same coverage and MAF: ')
   clusters = mclapply(unique(chrs), function(chr) {
@@ -723,12 +723,12 @@ isAB = function(cluster, efs, sigmaCut=3) {
 
 #the considered calls in the algorithm. (CL is complete loss, ie loss of both alleles.)
 allCalls = function() {
-  return(c('AB', 'A', 'AA', 'AAA', 'AAAA', 'AAB', 'AAAB', 'AAAAB', 'AAAAAB', 'AAAAAAB', 'AABB', 'AAABB', 'AAAABB', 'CL'))
+  return(c('AB', 'A', 'AA', 'AAA', 'AAAA', 'AAAAA', 'AAB', 'AAAB', 'AAAAB', 'AAAAAB', 'AAAAAAB', 'AABB', 'AAABB', 'AAAABB', 'CL'))
 }
 
 #returns the prior of a call.
 callPrior = function(call) {
-  priors = c('AB'=10, 'A'=1, 'AA'=1/2, 'AAA'=1/3, 'AAAA'=1/4, 'AAB'=1, 'AAAB'=1/2, 'AAAAB'=1/3, 'AAAAAB'=1/4, 'AAAAAAB'=1/5,
+  priors = c('AB'=10, 'A'=1, 'AA'=1/2, 'AAA'=1/3, 'AAAA'=1/4, 'AAAAA'=1/5, 'AAB'=1, 'AAAB'=1/2, 'AAAAB'=1/3, 'AAAAAB'=1/4, 'AAAAAAB'=1/5,
     'AABB'=1/2, 'AAABB'=1/4, 'AAAABB'=1/5, 'CL'=1/2)
   priors = priors/sum(priors)
   if ( call %in% names(priors) ) return(priors[call])
@@ -805,7 +805,8 @@ isCNV = function(cluster, efs, M, f, prior, sigmaCut=3) {
   MClone = log2(1 + (2^M-1)*clonality)
   #calculate likelihood for these f and M
   if ( cluster$cov == 0 ) pCall = exp(-1)
-  else pCall = fisherTest(pBinom(efs$cov, efs$var, refBias(fClone)))['pVal']
+  #else pCall = fisherTest(pBinom(efs$cov, efs$var, refBias(fClone)))['pVal']
+  else pCall = min(p.adjust(pBinom(efs$cov, efs$var, refBias(fClone)), method='fdr'))
   pM = 2*pt(-noneg(abs(cluster$M - MClone))/(cluster$width+systematicVariance()), df=cluster$df)  #allow systematic error
 
   #likelihood for both MAF and LFC fitting the called clonality
