@@ -243,10 +243,10 @@ postAnalyseVEP = function(outputDirectories, inputFiles, genome='hg19', cpus=1, 
   allVariantSaveFile = paste0(Rdirectory, '/allVariants.Rdata')
   save('allVariants', file=allVariantSaveFile)
 
-  makeScatterPlots(variants, samplePairs, timePoints, plotDirectory, genome=genome, cpus=cpus, forceRedo=T)
-  outputNewVariants(variants, samplePairs, genome, plotDirectory, cpus=cpus, forceRedo=T)
   outputSomaticVariants(variants, genome, plotDirectory, cpus=cpus, forceRedo=T)
   makeSNPprogressionPlots(variants, timeSeries=timeSeries, normals = normals, plotDirectory=plotDirectory, forceRedo=T)
+  makeScatterPlots(variants, samplePairs, timePoints, plotDirectory, genome=genome, cpus=cpus, forceRedo=T)
+  outputNewVariants(variants, samplePairs, genome, plotDirectory, cpus=cpus, forceRedo=T)
 }
 
 

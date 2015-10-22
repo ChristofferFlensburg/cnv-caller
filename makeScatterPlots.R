@@ -219,6 +219,7 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
         isCosmic = (q1$isCosmicCensus | q2$isCosmicCensus) & severe
         toPrint = toPrint | isCosmic
         col[isCosmic] = 'darkgreen'
+        cex[isCosmic] = pmax(1.5, 1.5*cex[isCosmic])
       }
     }
     if ( length(GoI) > 0 )
@@ -229,6 +230,12 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
       printNames[is.na(printNames)] = 'i'
       if ( length(toPrint) > 0 )
         text(freq1[toPrint], freq2[toPrint] + 0.015*pmax(0.6, cex[toPrint]), printNames, col = col[toPrint], cex = pmax(0.6, cex[toPrint])*printCex)
+      if ( 'isCosmicCensus' %in% names(q1) & 'isCosmicCensus' %in% names(q2) ) {
+        isCosmic = (q1$isCosmicCensus | q2$isCosmicCensus) & severe
+        if ( any(isCosmic) )
+          text(freq1[isCosmic], freq2[isCosmic] + 0.015*pmax(0.6, cex[isCosmic]), printNames,
+               col = col[isCosmic], cex = pmax(0.6, cex[isCosmic])*printCex)
+      }
       if ( verbose ) catLog('Highlighting', length(unique(printNames)), 'genes.\n')
       if ( outputHighlighted ) {
         out = data.frame('chr'=SNPs[toPrint,]$chr, 'pos'=SNPs[toPrint,]$start, 'x'=SNPs[toPrint,]$x, 'var'=q1$variant[toPrint], 'gene'=printNames,

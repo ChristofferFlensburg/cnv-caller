@@ -1,7 +1,7 @@
 
 
 #prints the somatic variants to an excel sheet.
-outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, forceRedo=forceRedoOutputSomatic) {
+outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, forceRedo=F) {
   outfile = paste0(plotDirectory, '/somaticVariants.xls')
   if ( (!file.exists(outfile) | forceRedo) ) {
     somatics = list()
