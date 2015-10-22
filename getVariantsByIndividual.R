@@ -93,38 +93,41 @@ getVariantsByIndividual = function(metaData, captureRegions, genome, BQoffset, d
   save(variantsBI, file=saveFile)
   catLog('done.\n')
 
-  
+  plotFrequencyDiagnostics(variantsBI, plotDirectory)
+    
+  return(variantsBI)
+}
+
+plotFrequencyDiagnostics = function(variants, plotDirectory) {
   diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
   if ( !file.exists(diagnosticPlotsDirectory) ) dir.create(diagnosticPlotsDirectory)
   FreqDirectory = paste0(diagnosticPlotsDirectory, '/frequencyDistribution/')
   catLog('Plotting frequency distributions to ', FreqDirectory,'..', sep='')
   if ( !file.exists(FreqDirectory) ) dir.create(FreqDirectory)
-  for ( sample in names(variantsBI$variants) ) {
+  for ( sample in names(variants$variants) ) {
     catLog(sample, '..', sep='')
-    use = variantsBI$variants[[sample]]$cov > 0
-    cov = normalVariantsBI$variants[[sample]]$cov[use] - 0.2 + noneg(rnorm(sum(use), 0, 0.2)+0.2)
-    var = normalVariantsBI$variants[[sample]]$var[use] - 0.2 + noneg(rnorm(sum(use), 0, 0.2)+0.2)
+    use = variants$variants[[sample]]$cov > 0
+    cov = variants$variants[[sample]]$cov[use] - 0.2 + noneg(rnorm(sum(use), 0, 0.2)+0.2)
+    var = variants$variants[[sample]]$var[use] - 0.2 + noneg(rnorm(sum(use), 0, 0.2)+0.2)
     png(paste0(FreqDirectory, sample, '-varcov.png'), height=2000, width=4000, res=144)
-    plotColourScatter((variantsBI$variants[[sample]]$var/variantsBI$variants[[sample]]$cov)[use],
-                      variantsBI$variants[[sample]]$cov[use],
-                      log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
+    plotColourScatter((var/cov), cov, log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
     dev.off()
     
-    use = variantsBI$variants[[sample]]$var > 0
+    use = variants$variants[[sample]]$var > 0
     if ( any(use) ) {
       pdf(paste0(FreqDirectory, sample, '-hist.pdf'), height=7, width=14)
-      hist((variantsBI$variants[[sample]]$var/variantsBI$variants[[sample]]$cov)[use],
+      hist((variants$variants[[sample]]$var/variants$variants[[sample]]$cov)[use],
            breaks=(0:100)/100, col=mcri('blue'), main='all Variants',
            xlab='variant frequency', ylab='number of variants')
-      cleanUse = use & variantsBI$variants[[sample]]$flag == ''
+      cleanUse = use & variants$variants[[sample]]$flag == ''
       if ( any(cleanUse) ) {
-        hist((variantsBI$variants[[sample]]$var/variantsBI$variants[[sample]]$cov)[cleanUse],
+        hist((variants$variants[[sample]]$var/variants$variants[[sample]]$cov)[cleanUse],
              breaks=(0:100)/100, col=mcri('blue'), main='clean Variants',
              xlab='variant frequency', ylab='number of variants')
       }
-      cleanDbUse = cleanUse & variantsBI$variants[[sample]]$db
+      cleanDbUse = cleanUse & variants$variants[[sample]]$db
       if ( any(cleanDbUse) ) {
-        hist((variantsBI$variants[[sample]]$var/variantsBI$variants[[sample]]$cov)[cleanDbUse],
+        hist((variants$variants[[sample]]$var/variants$variants[[sample]]$cov)[cleanDbUse],
              breaks=(0:100)/100, col=mcri('blue'), main='clean dbSNP Variants',
              xlab='variant frequency', ylab='number of variants')
       }
@@ -132,11 +135,7 @@ getVariantsByIndividual = function(metaData, captureRegions, genome, BQoffset, d
     }
   }
   catLog('done.\n')
-  
-  return(variantsBI)
 }
-
-
 
 
 
@@ -146,6 +145,7 @@ getVariantsByIndividual = function(metaData, captureRegions, genome, BQoffset, d
 #for each position. Duplicated positions are removed, and positions that fails to
 #align with an ensembl gene is marked with '?'.
 vcfToPositions = function(files, genome='hg19') {
+  files = unique(files)
   #if more than one file, call each file separately and rbind the outputs.
   if ( length(files) > 1 ) {
     catLog('Found', length(files), 'files.', '\n')
@@ -760,43 +760,7 @@ getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, 
   save(normalVariantsBI, file=saveFile)
   catLog('done.\n')
 
-  
-  diagnosticPlotsDirectory = paste0(plotDirectory, '/diagnostics')
-  if ( !file.exists(diagnosticPlotsDirectory) ) dir.create(diagnosticPlotsDirectory)
-  FreqDirectory = paste0(diagnosticPlotsDirectory, '/frequencyDistribution/')
-  catLog('Plotting frequency distributions to ', FreqDirectory,'..', sep='')
-  if ( !file.exists(FreqDirectory) ) dir.create(FreqDirectory)
-  for ( sample in names(normalVariantsBI$variants) ) {
-    catLog(sample, '..', sep='')
-    use = normalVariantsBI$variants[[sample]]$cov > 0
-    cov = normalVariantsBI$variants[[sample]]$cov[use] - 0.2 + noneg(rnorm(sum(use), 0, 0.2)+0.2)
-    var = normalVariantsBI$variants[[sample]]$var[use] - 0.2 + noneg(rnorm(sum(use), 0, 0.2)+0.2)
-    png(paste0(FreqDirectory, sample, '-varcov.png'), height=10, width=20, res=144, unit='in')
-    plotColourScatter(pmin(1,var/cov), cov, log='y', xlab='f', ylab='coverage', verbose=F, main=sample)
-    dev.off()
-    
-    use = normalVariantsBI$variants[[sample]]$var > 0
-    if ( any(use) ) {
-      pdf(paste0(FreqDirectory, sample, '-hist.pdf'), height=7, width=14)
-      hist((normalVariantsBI$variants[[sample]]$var/normalVariantsBI$variants[[sample]]$cov)[use],
-           breaks=(0:100)/100, col=mcri('blue'), main='all Variants',
-           xlab='variant frequency', ylab='number of variants')
-      cleanUse = use & normalVariantsBI$variants[[sample]]$flag == ''
-      if ( any(cleanUse) ) {
-        hist((normalVariantsBI$variants[[sample]]$var/normalVariantsBI$variants[[sample]]$cov)[cleanUse],
-             breaks=(0:100)/100, col=mcri('blue'), main='clean Variants',
-             xlab='variant frequency', ylab='number of variants')
-      }
-      cleanDbUse = cleanUse & normalVariantsBI$variants[[sample]]$db
-      if ( any(cleanDbUse) ) {
-        hist((normalVariantsBI$variants[[sample]]$var/normalVariantsBI$variants[[sample]]$cov)[cleanDbUse],
-             breaks=(0:100)/100, col=mcri('blue'), main='clean dbSNP Variants',
-             xlab='variant frequency', ylab='number of variants')
-      }
-      dev.off()
-    }
-  }
-  catLog('done.\n')
+  plotFrequencyDiagnostics(normalVariantsBI, plotDirectory)
     
   return(normalVariantsBI)
 }
