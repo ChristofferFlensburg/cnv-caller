@@ -13,9 +13,9 @@
 #' captureRegions = importCaptureRegions('path/to/my/captureRegions.bed')
 #' plotColourScatter(captureRegions$gc, captureRegions$dn, xlab='GC content', ylab='binding strength')
 #'
-importCaptureRegions = function(bedFile, reference, Rdirectory, genome='hg19') {
+importCaptureRegions = function(bedFile, reference, Rdirectory, genome='hg19', forceRedoCR=F) {
   saveFile = paste0(Rdirectory, '/captureRegions.Rdata')
-  if ( file.exists(saveFile) ) {
+  if ( file.exists(saveFile) & !forceRedoCR ) {
     catLog('Loading capture regions..')
     load(saveFile)
     catLog('done.\n')
@@ -23,10 +23,10 @@ importCaptureRegions = function(bedFile, reference, Rdirectory, genome='hg19') {
   }
   if ( !grepl('\\.bed$', bedFile) ) stop('Need .bed capture regions.')
   bsFile = gsub('\\.bed$', '.named.dn.bed', bedFile)
-  if ( !file.exists(bsFile) ) {
+  if ( !file.exists(bsFile) | forceRedoCR ) {
     catLog('Couldnt find a binding strength file at ', bsFile, ' Making one now.\n')
     namedFile = gsub('\\.bed$', '.named.bed', bedFile)
-    if ( !file.exists(namedFile) ) {
+    if ( !file.exists(namedFile) | forceRedoCR ) {
       catLog('Couldnt find a named capture region file at ', namedFile, '. Making one now.\n', sep='')
       nameCaptureRegions(bedFile, namedFile, Rdirectory, genome)
       catLog('Done and saved named file, now proceeding to binding strength.\n')
@@ -167,8 +167,9 @@ xToGene = function(x, genome='hg19', saveDirectory='', verbose=T) {
   variantRanges = GRanges(seqnames=chr, ranges = IRanges(start=pos, end=pos, names=x), strand='*')
   #allow hits up to 500bp away.
   OLs = as.matrix(findOverlaps(variantRanges, geneRanges, maxgap=500))
-  #remove duplicates, leaving only first hit for each variant
-  OLs = OLs[!duplicated(OLs[,1]),]
+  #remove duplicates, leaving only lowest index hit for each variant
+  OLs = OLs[order(OLs[,2]),]
+  OLs = OLs[!duplicated(OLs[,1]),,drop=F]
   
   rownames(OLs) = OLs[,1]
 
@@ -177,11 +178,6 @@ xToGene = function(x, genome='hg19', saveDirectory='', verbose=T) {
   genes = rep('?', length(x))
   genes[hasHit] = names(geneRanges)[OLs[xIndex[hasHit],2]]
   
-  #genes = sapply(1:length(x), function(i) {
-  #  rowname = as.character(i)
-  #  if ( rowname %in% rownames(OLs) ) return(names(geneRanges)[OLs[rowname,2]])
-  #  return('?')
-  #  })
   if ( sum(genes == '?') > 0 & verbose ) catLog('failed', sum(genes == '?'), 'positions...')
   if ( verbose ) catLog('done.\n')
 
