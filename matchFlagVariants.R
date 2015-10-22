@@ -250,8 +250,13 @@ markSomatics = function(variants, normalVariants, individuals, normals, cpus=cpu
     pPolymorphic = 1/(1+nrow(q)/(polymorphicFrequency*basePairs))
     pNormalFreq = pBinom(q$cov, q$var, normalFreq)
     normalOK = pmin(1, noneg((0.05-normalFreq)/0.05))^2*(normalFreq < freq)
-    if ( !(name %in% names(CNs)) ) catLog('No matched normal: removing all dbSNPs from the somatic candidates.\n', sep='')
-    notInNormal = as.numeric(!q$db)
+    
+    if ( !(name %in% names(CNs)) ) catLog('\nWARNING! No matched normal: removing all validated dbSNPs over 0.1% population frequency from the somatic candidates! Remaining somatics will include rare germline variants.\n', sep='')
+    commonPopulationVariant = q$db
+    if ( 'dbValidated' %in% names(q) ) commonPopulationVariant = commonPopulationVariant & q$dbValidated
+    if ( 'dbMAF' %in% names(q) ) commonPopulationVariant = commonPopulationVariant & q$dbMAF > 0.001
+    notInNormal = !commonPopulationVariant
+    
     if ( name %in% names(CNs) ) {
       catLog('Correcting somatics using matched normal.\n')
       qn = variants$variants[[correspondingNormal[name]]][use,]
