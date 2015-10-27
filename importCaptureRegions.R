@@ -13,9 +13,9 @@
 #' captureRegions = importCaptureRegions('path/to/my/captureRegions.bed')
 #' plotColourScatter(captureRegions$gc, captureRegions$dn, xlab='GC content', ylab='binding strength')
 #'
-importCaptureRegions = function(bedFile, reference, Rdirectory, genome='hg19', forceRedoCR=F) {
+importCaptureRegions = function(bedFile, reference, Rdirectory, genome='hg19', forceRedoCR=F, forceRedoRdirectorySave=F) {
   saveFile = paste0(Rdirectory, '/captureRegions.Rdata')
-  if ( file.exists(saveFile) & !forceRedoCR ) {
+  if ( file.exists(saveFile) & !forceRedoCR & !forceRedoRdirectorySave ) {
     catLog('Loading capture regions..')
     load(saveFile)
     catLog('done.\n')
