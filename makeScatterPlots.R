@@ -233,7 +233,7 @@ qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCo
       if ( 'isCosmicCensus' %in% names(q1) & 'isCosmicCensus' %in% names(q2) ) {
         isCosmic = (q1$isCosmicCensus | q2$isCosmicCensus) & severe
         if ( any(isCosmic) )
-          text(freq1[isCosmic], freq2[isCosmic] + 0.015*pmax(0.6, cex[isCosmic]), printNames,
+          text(freq1[isCosmic], freq2[isCosmic] + 0.015*pmax(0.6, cex[isCosmic]), printNames[isCosmic[which(toPrint)]],
                col = col[isCosmic], cex = pmax(0.6, cex[isCosmic])*printCex)
       }
       if ( verbose ) catLog('Highlighting', length(unique(printNames)), 'genes.\n')
