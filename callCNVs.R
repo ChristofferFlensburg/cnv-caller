@@ -723,12 +723,12 @@ isAB = function(cluster, efs, sigmaCut=3) {
 
 #the considered calls in the algorithm. (CL is complete loss, ie loss of both alleles.)
 allCalls = function() {
-  return(c('AB', 'A', 'AA', 'AAA', 'AAAA', 'AAAAA', 'AAB', 'AAAB', 'AAAAB', 'AAAAAB', 'AAAAAAB', 'AABB', 'AAABB', 'AAAABB', 'CL'))
+  return(c('AB', 'A', 'AA', 'AAA', 'AAAA', 'AAAAA', 'AAB', 'AAAB', 'AAAAB', 'AAAAAB', 'AAAAAAB', 'AAAAAAAAAB', 'AAAAAAAAAAAAAAAAAAAB', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB', 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB', 'AABB', 'AAABB', 'AAAABB', 'CL'))
 }
 
 #returns the prior of a call.
 callPrior = function(call) {
-  priors = c('AB'=10, 'A'=1, 'AA'=1/2, 'AAA'=1/3, 'AAAA'=1/4, 'AAAAA'=1/5, 'AAB'=1, 'AAAB'=1/2, 'AAAAB'=1/3, 'AAAAAB'=1/4, 'AAAAAAB'=1/5,
+  priors = c('AB'=10, 'A'=1, 'AA'=1/2, 'AAA'=1/3, 'AAAA'=1/4, 'AAAAA'=1/5, 'AAB'=1, 'AAAB'=1/2, 'AAAAB'=1/3, 'AAAAAB'=1/4, 'AAAAAAB'=1/5, 'AAAAAAAAAB'=1/10, 'AAAAAAAAAAAAAAAAAAAB'=1/10, 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB'=1/10, 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB'=1/10,
     'AABB'=1/2, 'AAABB'=1/4, 'AAAABB'=1/5, 'CL'=1/2)
   priors = priors/sum(priors)
   if ( call %in% names(priors) ) return(priors[call])
@@ -1012,7 +1012,7 @@ boostCRwidth = function(CR, plot=F) {
 plotMAFLFC = function(clusters, xlim=c(-1.2, 1.2)) {
   plot(0, type='n', xlim=xlim, ylim=c(0, 0.5), xlab='LFC', ylab='MAF')
   clonalities = (0:500)/500
-  for ( call in allCalls()[c(1:8, 11:12)] ) {
+  for ( call in c('AB', 'CL', 'A', 'AA', 'AAA', 'AAAA', 'AAAAA', 'AAB', 'AAAB', 'AAAAB', 'AABB', 'AAABB') ) {
     fMs = callCloneTofM(call, clonalities)
     points(fMs[,2], fMs[,1], pch=16, cex=2*clonalities, col=callsToCol(call))
     text(fMs[round(length(clonalities)*0.6),2]+0.05, fMs[round(length(clonalities)*0.6),1]+0.01, call, col=callsToCol(call))
@@ -1041,17 +1041,22 @@ callsToCol = function(calls) {
   return(sapply(calls, callToCol))
 }
 callToCol = function(call) {
-  if ( call == 'AB' ) return(mcri('black'))
-  if ( call == 'A' ) return(mcri('red'))
-  if ( call == 'AAB' ) return(mcri('cyan'))
-  if ( call == 'AAAB' ) return(mcri('orange'))
-  if ( call == 'AAAAB' ) return(mcri('green'))
-  if ( call == 'AAAAAB' ) return(mcri('black'))
-  if ( call == 'AAAAAAB' ) return(mcri('black'))
-  if ( call == 'AA' ) return(mcri('green'))
-  if ( call == 'CL' ) return(mcri('orange'))
-  if ( call == 'AABB' ) return(mcri('purple'))
-  if ( call == 'AAA' ) return(mcri('grey'))
+  alpha = if ( grepl('\\?', call) ) 0.3 else 1
+  call = gsub('\\?', '', call)
+  if ( call == 'AB' ) return(mcri('black', alpha))
+  if ( call == 'A' ) return(mcri('red', alpha))
+  if ( call == 'AAB' ) return(mcri('cyan', alpha))
+  if ( call == 'AAAB' ) return(mcri('orange', alpha))
+  if ( call == 'AAAAB' ) return(mcri('green', alpha))
+  if ( call == 'AAAAAB' ) return(mcri('black', alpha))
+  if ( call == 'AAAAAAB' ) return(mcri('black', alpha))
+  if ( call == 'AA' ) return(mcri('green', alpha))
+  if ( call == 'CL' ) return(mcri('orange', alpha))
+  if ( call == 'AABB' ) return(mcri('purple', alpha))
+  if ( call == 'AAA' ) return(mcri('blue', alpha))
+  if ( call == 'AAAA' ) return(mcri('grey', alpha))
+  if ( call == 'AAAAA' ) return(mcri('darkred', alpha))
+  if ( call == 'AAABB' ) return(mcri('blue', alpha))
   return('black')
 }
 
