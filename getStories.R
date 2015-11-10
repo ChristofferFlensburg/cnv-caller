@@ -10,6 +10,13 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, normals, genom
     load(file=saveFile)
     return(stories)
   }
+
+  #add theoretical errors to the CNA calls
+  #this accounts for things such as 100% AAB = 50% AAAB.
+  #removed (for now), as the consistency and dodgyness fixes handles the same problem
+  #and fixing it twice makes it too conservative.
+  #cnvs = addTheoreticalCNVerrors(cnvs)
+  
   if ( length(timeSeries) > 0 ) {
     for ( i in 1:length(timeSeries) ) {
       ts = timeSeries[[i]]
@@ -60,40 +67,52 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, normals, genom
         apply(clusteredStories$cloneStories$errors-1e-5 < 0, 1, all))
       rownames(clusteredStories$cloneStories)[germlineCluster] = clusteredStories$cloneStories$call[germlineCluster] = 'germline'
       rownames(clusteredStories$cloneStories$stories)[germlineCluster] = rownames(clusteredStories$cloneStories$errors)[germlineCluster] = 'germline'
-
-      #add in previously filtered SNV and CNA stories if they fit with the found clones
-      #accept somatic SNVs down to 0.5 somaticP for these
-      somaticMx = do.call(cbind, lapply(qs, function(q) q$somaticP > 0.5))
-      somatic = apply(somaticMx, 1, any)
-      somaticQs = lapply(qs, function(q) q[somatic,])
-      filteredSnpStories = findSNPstories(somaticQs, cnvs[ts], normals[ts], filter=F)
-      filteredSnpStories = filteredSnpStories[!(rownames(filteredSnpStories) %in% snpStories),]
-      filteredCnvStories = getCNVstories(cnvs[ts], normals[ts], genome, filter=F)
-      filteredCnvStories = filteredCnvStories[!(rownames(filteredCnvStories) %in% cnvStories),]
-      
-      filteredStories = combineStories(filteredSnpStories, filteredCnvStories)
-      filteredStories = filteredStories[!(rownames(filteredStories) %in% rownames(allStories)),]
-      
-      if ( nrow(filteredStories) > 0 )
-        clusteredStories = mergeStories(clusteredStories, filteredStories)
-      
-      if ( any(!(unlist(clusteredStories$storyList) %in% rownames(allStories))) ) {
-        addedStories = unlist(clusteredStories$storyList)[!(unlist(clusteredStories$storyList) %in% rownames(allStories))]
-        allStories = combineStories(allStories, filteredStories[addedStories,])
-      }
-      
-      #pick out the variants that behave like germline, ie present clonaly in all samples
-      if ( nrow(clusteredStories$cloneStories) > 1 ) {
-        germlineVariants = clusteredStories$storyList[[which(rownames(clusteredStories$cloneStories) == 'germline')]]
-        germlineVariants = germlineVariants[germlineVariants != 'germline']
-      }
-      else germlineVariants = c()
+      names(clusteredStories$storyList)[germlineCluster] = 'germline'
+      catLog('got', nrow(clusteredStories$cloneStories), 'stories...')
 
       #combine the clustered stories into clonal evolution (figure out which is subclone of which)
       catLog('decide subclone structure..')
       cloneTree = findCloneTree(clusteredStories$cloneStories)
+
+      catLog('removing inconsistent dodgy clones..')
+      consistentTree = makeTreeConsistent(cloneTree, clusteredStories$cloneStories, clusteredStories$storyList)
+      consistentClusteredStories = clusteredStories
+      consistentClusteredStories$cloneTree = consistentTree
+      consistentClusteredStories$cloneStories = consistentClusteredStories$cloneStories[clonesInTree(consistentTree),]
+      consistentClusteredStories$storyList = consistentClusteredStories$storyList[clonesInTree(consistentTree)]
+      catLog('got', nrow(consistentClusteredStories$cloneStories), 'consistent stories...')
+
       
-      stories[[name]] = list('all'=allStories, 'clusters'=clusteredStories, 'cloneTree'=cloneTree, 'germlineVariants'=germlineVariants)
+      #add in previously filtered SNV and CNA stories if they fit with the found clones
+      #also reassign anchor mutations to best fitting clone.
+      #accept somatic SNVs down to 0.5 somaticP for these
+      somaticMx = do.call(cbind, lapply(qs, function(q) q$somaticP > 0.5))
+      somatic = apply(somaticMx, 1, any)
+      somaticQs = lapply(qs, function(q) q[somatic,])
+      allSnpStories = findSNPstories(somaticQs, cnvs[ts], normals[ts], filter=F)
+      allCnvStories = getCNVstories(cnvs[ts], normals[ts], genome, filter=F)
+      allStories = combineStories(allSnpStories, allCnvStories)
+
+      #reassign mutations to the consistent clones
+      consistentClusteredStories$storyList = lapply(consistentClusteredStories$storyList, function(l) c())
+      consistentClusteredStories = mergeStories(consistentClusteredStories, allStories)
+
+      #reassign mutations to all clones, to see what mutations give rise to the removed stories
+      clusteredStories$storyList = lapply(clusteredStories$storyList, function(l) c())
+      clusteredStories = mergeStories(clusteredStories, allStories)
+
+      #separate stories that fitted to a consistent clone
+      allConsistentStories = allStories[unlist(consistentClusteredStories$storyList),]
+      
+      #pick out the variants that behave like germline, ie present clonaly in all samples
+      if ( nrow(clusteredStories$cloneStories) > 1 ) {
+        germlineVariants = consistentClusteredStories$storyList[[which(rownames(consistentClusteredStories$cloneStories) == 'germline')]]
+        germlineVariants = germlineVariants[germlineVariants != 'germline']
+      }
+      else germlineVariants = c()
+
+      
+      stories[[name]] = list('allConsistent'=allConsistentStories, 'consistentClusters'=consistentClusteredStories, 'consistentTree'=consistentTree, 'germlineVariants'=germlineVariants, 'all'=allStories, 'clusters'=clusteredStories, 'cloneTree'=cloneTree)
       catLog('done!\n')
     }
   }
@@ -395,6 +414,27 @@ cnvsToStories = function(cnvs, events, normal, genome, filter=T) {
       }
       i = i + 1
     }
+
+    if ( nrow(events) > 1 ) {
+      Nevents = nrow(events)
+      keep = rep(T, Nevents)
+      for ( x1 in unique(events$x1) ) {
+        rows = events$x1 == x1
+        if ( sum(rows) == 0 ) next
+        subStories = stories[rows,]
+        subKeep = keep[rows]
+        while ( any(colSums(subStories[subKeep,]) > 1) ) {
+          presence = rowSums(subStories[subKeep,])
+          subKeep[subKeep][which.min(presence)] = F
+        }
+        keep[rows] = subKeep
+      }
+      catLog(sum(!keep), 'overlapping stories filtered..')
+      events = events[keep,]
+      stories = stories[keep,]
+      errors = errors[keep,]
+    }
+    
   }
   else {
     events$stories=matrix(,nrow=0, ncol=length(cnvs))
@@ -416,7 +456,7 @@ cnvsToStories = function(cnvs, events, normal, genome, filter=T) {
   ret = ret[!uncertain,,drop=F]
   notSignificant = rowSums(abs(ret$stories) < ret$errors*1.5 | is.na(ret$errors)) >= ncol(ret$stories)
   ret = ret[!notSignificant,,drop=F]
-  smallRegion = ret$x2 - ret$x1 < 5e6
+  smallRegion = ret$x2 - ret$x1 < 5e6 & !(ret$call == 'CL' & apply(ret$stories, 1, max) > 0.7)
   ret = ret[!smallRegion,,drop=F]
   if ( any(normal) ) {
     presentInNormal = ret$stories[,normal,drop=F] > ret$errors[,normal,drop=F] | ret$stories[,normal,drop=F] > 0.2
@@ -441,9 +481,16 @@ extractClonalities = function(cnvs, event) {
     return(ret)
     })
   fM = callTofM(as.character(event$call))
-  ret = as.data.frame(do.call(rbind, lapply(1:nSample, function(sample)
-    unlist(isCNV(cluster=subCR[sample,], efs=subFreqsMirror[[sample]], M=fM[2], f=fM[1],
-                 prior=callPrior(as.character(event$call)))))), stringsAsFactors=F)
+  prior = callPrior(as.character(event$call))
+  ret = as.data.frame(do.call(rbind, lapply(1:nSample, function(sample) {
+    efs=subFreqsMirror[[sample]]
+    iscnv = isCNV(cluster=subCR[sample,], efs=efs, M=fM[2], f=fM[1], prior=prior)
+    #theoreticalError = getTheoreticalError(cluster=subCR[sample,], call=as.character(event$call), efs=efs)
+    #iscnv$clonalityError = sqrt(iscnv$clonalityError^2 + theoreticalError^2)
+    bestSigma = getBestSigma(cluster=subCR[sample,], call=as.character(event$call), efs=efs)
+    return(c(iscnv$call, iscnv$clonality, iscnv$sigma, iscnv$clonalityError, bestSigma))
+  })), stringsAsFactors=F)
+  names(ret) = c('call', 'clonality', 'sigma', 'clonalityError', 'bestSigma')
   direction = rep(0, nSample)
 
   if ( fM[1] != 0.5 ) {
@@ -455,9 +502,15 @@ extractClonalities = function(cnvs, event) {
     }
   }
 
-  ret$clonality[ret$sigma > 5] = 0
-  ret$clonality[ret$sigma > 5] = 0
-  ret$clonalityError[ret$sigma > 5] = sqrt(ret$clonalityError[ret$sigma > 5]^2 + 1/ret$sigma[ret$sigma > 5]^2)
+  #if there are other much better calls, this call probably isnt present
+  wrongCall = ret$sigma > 5 & ret$bestSigma < 3
+  ret$clonality[wrongCall] = 0
+
+  #if no call gives a good fit, just up the uncertainty depending on how bad fit.
+  #messedUpCall = ret$sigma > 5 & !wrongCall
+  #ret$clonalityError[messedUpCall] = sqrt(ret$clonalityError[messedUpCall]^2 + ((ret$sigma[messedUpCall]-5)/5)^2)
+  ret$clonalityError = sqrt(ret$clonalityError^2 + ((ret$sigma - 2)/20)^2)
+  
   ret$clonality[!is.na(direction) & direction < 0] = -ret$clonality[!is.na(direction) & direction < 0]
   if ( !any(ret$clonality > 0) & any(ret$clonality < 0) ) ret$clonality = - ret$clonality
   
@@ -599,7 +652,7 @@ pairScore = function(stories, is, js) {
 
 
 #helper function that decided which subclones are subclones of each other.
-findCloneTree = function(cloneStories) {
+findCloneTree = function(cloneStories, storyList) {
   #add the purity as a story (this may or may not already be present)
   purity = sapply(1:ncol(cloneStories$stories), function(i) max(cloneStories$stories[,i]))
   #check which clones are subclones of which others, allowing an error bar from each clone.
@@ -614,7 +667,7 @@ findCloneTree = function(cloneStories) {
   subcloneStories = cloneStories$stories
   rownames(subcloneMx) = colnames(subcloneMx) = rownames(subcloneStories) = rownames(cloneStories)
   
-  cloneTree = list('all'=findChildren(subcloneMx, subcloneStories))
+  cloneTree = findChildren(subcloneMx, subcloneStories)
 
   return(cloneTree)
 }
@@ -624,10 +677,10 @@ findChildren = function(subcloneMx, subcloneStories) {
   if ( nrow(subcloneStories) == 0 ) return(list())
 
   #there will be at least one clone that is not a subclone (aka paranetless, the one with the largest clonality sum)
-  is = which(rowSums(subcloneMx) == 0)
-  cloneNames = rownames(subcloneStories)[is]
+  cloneNames = rownames(subcloneStories)[which(rowSums(subcloneMx) == 0)]
+  
   #score the parentless subclones from the sum of clonalities.
-  cloneScores = rowSums(abs(subcloneStories))[is]
+  cloneScores = rowSums(abs(subcloneStories))[cloneNames]
   cloneScores = sort(cloneScores, decreasing=T)
 
   #go through the parentless clones in order of score, each one recurring with its subclones.
@@ -695,4 +748,164 @@ combineStories = function(stories1, stories2) {
   ret$errors = as.matrix(rbind(stories1$errors, stories2$errors))
   rownames(ret$stories) = rownames(ret$errors) = rownames(ret)
   return(ret)
+}
+
+
+addTheoreticalCNVerrors = function(cnvs) {
+  for ( sample in names(cnvs) ) {
+    clusters = cnvs[[sample]]$clusters
+    eFreqs = cnvs[[sample]]$eFreqs
+    eFreqs$var = mirrorDown(eFreqs$var, eFreqs$cov)
+    for ( row in 1:nrow(clusters) ) {
+      call = clusters$call[row]
+      if ( grepl('\\?', call) ) next
+      if ( call == 'AB' ) next
+      efs = eFreqs[eFreqs$x > clusters$x1[row] & eFreqs$x < clusters$x2[row],]
+
+      theoreticalError = getTheoreticalError(clusters[row,], clusters$call[row], efs)
+      clusters[row,]$clonalityError = sqrt(clusters[row,]$clonalityError^2 + theoreticalError^2)
+    }
+
+    cnvs[[sample]]$clusters = clusters
+  }
+
+  return(cnvs)
+}
+
+getTheoreticalError = function(cluster, call, efs) {
+  isCall = isCNV(cluster, efs, callTofM(call)['M'],
+    callTofM(call)['f'], callPrior(call), 5)
+  bestSigma = isCall$sigma
+  bestClonality = isCall$clonality
+  
+  secondBestCall = ''
+  secondBestSigma = Inf
+  secondBestClonality = 0
+  for ( tryCall in allCalls()[allCalls() != call] ) {
+    iscnv = isCNV(cluster, efs, callTofM(tryCall)['M'],
+      callTofM(tryCall)['f'], callPrior(tryCall), bestSigma)
+    if ( secondBestCall == '' || iscnv$sigma < secondBestSigma ) {
+      secondBestCall = tryCall
+      secondBestSigma = iscnv$sigma
+      secondBestClonality = iscnv$clonality
+    }
+  }
+  
+  theoreticalError = abs(secondBestClonality - bestClonality)/
+    (1 + sqrt(noneg(max(bestSigma, secondBestSigma)^2-bestSigma^2)))
+
+  return(theoreticalError)
+}
+
+
+getBestSigma = function(cluster, call, efs) {
+  bestSigma = Inf
+  for ( tryCall in allCalls() ) {
+    iscnv = isCNV(cluster, efs, callTofM(tryCall)['M'],
+      callTofM(tryCall)['f'], callPrior(tryCall), 5)
+    if ( iscnv$sigma < bestSigma ) {
+      bestSigma = iscnv$sigma
+    }
+  }
+  
+  return(bestSigma)
+}
+
+
+makeTreeConsistent = function(cloneTree, cloneStories, storyList) {
+
+  toRemove = findFirstUnitarityViolation(cloneTree, cloneStories, storyList)
+  if ( length(toRemove) == 0 ) return(cloneTree)
+  
+  #remove story from tree.
+  cloneStories = cloneStories[rownames(cloneStories) != toRemove,]
+  storyList = storyList[names(storyList) != toRemove]
+
+  cloneTree = findCloneTree(cloneStories)
+
+  #recur until nothing needs to be removed
+  cloneTree = makeTreeConsistent(cloneTree, cloneStories, storyList)
+  
+  return(cloneTree)
+  
+}
+
+findFirstUnitarityViolation = function(cloneTree, cloneStories, storyList) {
+  if ( length(cloneTree) == 0 ) return(c())
+
+  for ( name in names(cloneTree) ) {
+    if ( length(cloneTree[[name]]) == 0 ) {
+      next
+    }
+      
+    isViolating = isUnitarityViolating(cloneStories[names(cloneTree[[name]]),], cloneStories[name,])
+    if ( isViolating ) { 
+      dodgyness = getDodgyness(storyList[names(cloneTree[[name]])], cloneStories[names(cloneTree[[name]]),])
+      suspect = names(cloneTree[[name]])[which.max(dodgyness)]
+      return(suspect)
+    }
+    
+    deeperSuspect = findFirstUnitarityViolation(cloneTree[[name]], cloneStories, storyList)
+    if ( length(deeperSuspect) > 0 ) {
+      return(deeperSuspect)
+    }
+
+  }
+
+  return(c())
+}
+
+isUnitarityViolating = function(cloneStories, parentStory) {
+  return(any(colsums(noneg(cloneStories$stories - cloneStories$errors)) > parentStory$stories+parentStory$errors))
+}
+
+
+getDodgyness = function(storyList, stories) {
+  dodgyness = sapply(names(storyList), function(name) {
+    mutations = storyList[[name]]
+    if ( name == 'germline' ) return(0)
+    Nmut = length(mutations)
+    Ncna = sum(grepl('^chr', mutations))
+    Nindel = sum(grepl('[+-]', mutations))
+    Nsnv = Nmut - Ncna - Nindel
+
+    #few mutations overall
+    ret = 1/Nmut
+    
+    #high indel/snv ratio
+    ret = ret + Nindel/(Nsnv+Nindel+1)
+
+    #close-by SNVs (less than 10kbp)
+    if ( Nsnv > 1 ) {
+      snvX = as.numeric(gsub('[A-Z]', '', mutations[!grepl('^chr', mutations) & !grepl('[+-]', mutations)]))
+      snvX = sort(snvX)
+      closeBy = snvX[2:length(snvX)] - snvX[1:(length(snvX)-1)] < 1e4
+      ret = ret + noneg(sum(closeBy)/length(closeBy) - 0.1)
+    }
+    
+    #high cna/snv ratio
+    ret = ret + Ncna/(Ncna+Nsnv+1)
+
+    #less dodgy if both CNA and SNV support
+    ret = noneg(ret - (Ncna > 0 & Nsnv > 0)*0.2)
+
+    #noise tends to be reasonably constant over samples
+    highestLow = max(stories[name,]$stories - stories[name,]$errors)
+    lowestHigh = min(stories[name,]$stories + stories[name,]$errors)
+    significantChange = noneg(highestLow - lowestHigh)
+    ret = ret + noneg(0.5 - significantChange)*2
+
+    return(ret)
+  })
+  return(dodgyness)
+}
+
+clonesInTree = function(tree) {
+  if ( length(tree) == 0 ) return('')
+
+  namesOnThisLevel = names(tree)
+  namesOnDeeperLevels = unlist(sapply(tree, clonesInTree))
+  namesOnDeeperLevels = namesOnDeeperLevels[namesOnDeeperLevels != '']
+
+  return(c(namesOnThisLevel, namesOnDeeperLevels))
 }
