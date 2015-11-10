@@ -239,12 +239,15 @@ postAnalyseVEP = function(outputDirectories, inputFiles, genome='hg19', cpus=1, 
   variants = getMoreVEPinfo(variants, plotDirectory, genome, cosmicDirectory=cosmicDirectory)
   allVariants = data$allVariants
   allVariants$variants = variants
-  
+
   allVariantSaveFile = paste0(Rdirectory, '/allVariants.Rdata')
+  cat('Saving fully annotated variants to', allVariantSaveFile, '...')
   save('allVariants', file=allVariantSaveFile)
+  cat('done.\n')
 
   outputSomaticVariants(variants, genome, plotDirectory, cpus=cpus, forceRedo=T)
   makeSNPprogressionPlots(variants, timeSeries=timeSeries, normals = normals, plotDirectory=plotDirectory, forceRedo=T)
+  makeRiverPlots(data$stories$stories, variants, genome=genome, cpus=cpus, plotDirectory=plotDirectory, forceRedo=T)
   makeScatterPlots(variants, samplePairs, timePoints, plotDirectory, genome=genome, cpus=cpus, forceRedo=T)
   outputNewVariants(variants, samplePairs, genome, plotDirectory, cpus=cpus, forceRedo=T)
 }
