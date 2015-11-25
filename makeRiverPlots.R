@@ -99,7 +99,7 @@ storyToLabel = function(stories, variants, genome, maxLength=30) {
   SNPs = SNPs[as.character(stories$x1[isSNP]),]
   gene = SNPs$inGene
   if ( 'severity' %in% names(variants$variants[[1]]) & any(isSNP) ) {
-    severityMx = sapply(variants$variants, function(q) q[call[isSNP],]$severity)
+    severityMx = sapply(variants$variants, function(q) ifelse(is.na(q[call[isSNP],]$severity), 100, q[call[isSNP],]$severity))
     if ( sum(isSNP) == 1 ) severityMx = matrix(severityMx, nrow=sum(isSNP))
     mostSevere = ceiling(apply(severityMx, 1, min))
     severity[isSNP] = mostSevere

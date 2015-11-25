@@ -713,6 +713,7 @@ inGene = function(SNPs, genes, noHit = NA, genome='hg19') {
 getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, BQoffset, dbDir, normalRdirectory, Rdirectory, plotDirectory, cpus, forceRedoSNPs=F, forceRedoVariants=F) {
   SNPs = variants$SNPs
   variants = variants$variants
+  variantsToCheck = unique(do.call(c, lapply(variants, rownames)))
 
   saveFile = paste0(Rdirectory, '/normalVariantsBI.Rdata')
   if ( file.exists(saveFile) & !forceRedoVariants ) {
@@ -740,6 +741,8 @@ getNormalVariants = function(variants, bamFiles, names, captureRegions, genome, 
     q = QCsnps(pileups=importQualityScores(SNPs, bam, BQoffset, genome=genome, cpus=cpus)[[1]],
                positions=SNPs, cpus=cpus)
     q = q[!is.na(q$x),]
+    #filter out any new variants in the normal samples that are not previously seen
+    q = q[variantsToCheck[variantsToCheck %in% rownames(q)],]
     normalVariantsBI[[name]] = q
     
     catLog('saving variants...')
