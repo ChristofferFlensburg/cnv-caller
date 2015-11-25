@@ -69,7 +69,7 @@ outputSomaticVariants = function(variants, genome, plotDirectory, cpus=cpus, for
 
     catLog('Writing to .csv...')
     for ( sample in names(somatics) ) {
-      somatics[[sample]]$sample = sample
+      somatics[[sample]]$sample = rep(sample, nrow(somatics[[sample]]))
     }
     allSomatics = do.call(rbind, somatics)
     write.csv(allSomatics, gsub('.xls$', '.csv', outfile))

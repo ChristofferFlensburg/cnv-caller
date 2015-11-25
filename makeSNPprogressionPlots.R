@@ -91,7 +91,8 @@ qualityProgression = function(qs, SNPs, normal, db=T, nondb=T, excelFile='', mai
 
   if ( sum(doColour) > 1 ) {
     catLog('plotting heatmap..')
-    rGcol = unique(D3colours(rep(1, sum(isRecurringGene)), rep(1, sum(isRecurringGene)), hue[isRecurringGene]))
+    nRecurringGenes = length(unique(hue[isRecurringGene]))
+    rGcol = D3colours(rep(1, nRecurringGenes), rep(1, nRecurringGenes), unique(hue[isRecurringGene]))
     rG = unique(gene[isRecurringGene])
     names(rGcol) = rG
     Rowv = NULL

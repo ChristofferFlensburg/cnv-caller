@@ -67,10 +67,17 @@ makeScatterPlots = function(variants, samplePairs, timePoints, plotDirectory, ge
 
 #helper function that generates fancy scatter plots of the frequencies of two samples.
 #Requires two variants objects, and a SNPs object.
-qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCov=10, main='', xlab='variant frequency: sample1', ylab='variant frequency: sample2', plotFlagged=T, cpus=1, verbose=T, print = F, printRedCut = 0.99, printOnlyNovel=F, plotPosition=F, genome='hg19', xlim=c(0,1), ylim=c(0,1), outputHighlighted=F, frame.plot=F, legend=T, redCut=0.75, forceCol=NA, add=F, GoI=c(), printCex=1, doPlot=T, ...) {
+qualityScatter = function(q1, q2, SNPs, ps = NA, covScale=100, maxCex=1.5, minCov=10, main='', xlab='variant frequency: sample1', ylab='variant frequency: sample2', plotFlagged=T, cpus=1, verbose=T, print = F, printRedCut = 0.99, printOnlyNovel=F, plotPosition=F, genome='hg19', xlim=c(0,1), ylim=c(0,1), outputHighlighted=F, frame.plot=F, legend=T, redCut=0.75, forceCol=NA, add=F, GoI=c(), printCex=1, doPlot=T, minSomaticP=0, ...) {
   use = q1$var > 0 | q2$var > 0
   q1 = q1[use,]
   q2 = q2[use,]
+
+  if ( minSomaticP > 0 & 'somaticP' %in% names(q1) & 'somaticP' %in% names(q2)  ) {
+    use = pmax(q1$somaticP) >= minSomaticP
+    q1 = q1[use,]
+    q2 = q2[use,]    
+  }
+  
   freq1 = q1$var/q1$cov
   freq1[is.na(freq1)] = -0.02
   freq2 = q2$var/q2$cov
