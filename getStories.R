@@ -62,7 +62,7 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, normals, genom
       rownames(allStories$stories) = rownames(allStories$errors) = rownames(allStories)
       
       #clusters stories into clones
-      clusteredStories = storiesToCloneStories(allStories, variants$SNPs, plotProgress=F, plot=F, cpus=cpus)
+      clusteredStories = storiesToCloneStories(allStories, cpus=cpus)
       germlineCluster = which(apply(clusteredStories$cloneStories$stories + 1e-3 > 1, 1, all) &
         apply(clusteredStories$cloneStories$errors-1e-5 < 0, 1, all))
       rownames(clusteredStories$cloneStories)[germlineCluster] = clusteredStories$cloneStories$call[germlineCluster] = 'germline'
@@ -89,17 +89,29 @@ getStories = function(variants, normalVariants, cnvs, timeSeries, normals, genom
       somaticMx = do.call(cbind, lapply(qs, function(q) q$somaticP > 0.5))
       somatic = apply(somaticMx, 1, any)
       somaticQs = lapply(qs, function(q) q[somatic,])
-      allSnpStories = findSNPstories(somaticQs, cnvs[ts], normals[ts], filter=F)
-      allCnvStories = getCNVstories(cnvs[ts], normals[ts], genome, filter=F)
-      allStories = combineStories(allSnpStories, allCnvStories)
+      snpStories = findSNPstories(somaticQs, cnvs[ts], normals[ts], filter=F)
+      cnvStories = getCNVstories(cnvs[ts], normals[ts], genome, filter=F)
+      allStories = data.frame(row.names=c('germline', rownames(snpStories), rownames(cnvStories)), stringsAsFactors=F)
+      allStories$x1 = c(NA, snpStories$x1, cnvStories$x1)
+      allStories$x2 = c(NA, snpStories$x2, cnvStories$x2)
+      allStories$call = c('germline', as.character(snpStories$call), as.character(cnvStories$call))
+      allStories$stories = as.matrix(rbind(matrix(rep(1, length(qs)), nrow=1), snpStories$stories, cnvStories$stories))
+      allStories$errors = as.matrix(rbind(matrix(rep(0, length(qs)), nrow=1), snpStories$errors, cnvStories$errors))
+      rownames(allStories$stories) = rownames(allStories$errors) = rownames(allStories)
 
       #reassign mutations to the consistent clones
       consistentClusteredStories$storyList = lapply(consistentClusteredStories$storyList, function(l) c())
       consistentClusteredStories = mergeStories(consistentClusteredStories, allStories)
 
-      #reassign mutations to all clones, to see what mutations give rise to the removed stories
-      clusteredStories$storyList = lapply(clusteredStories$storyList, function(l) c())
-      clusteredStories = mergeStories(clusteredStories, allStories)
+      #redo clustering of mutations, this time using unfiltered mutations, and no consistency contstraints.
+      clusteredStories = storiesToCloneStories(allStories, cpus=cpus)
+      germlineCluster = which(apply(clusteredStories$cloneStories$stories + 1e-3 > 1, 1, all) &
+        apply(clusteredStories$cloneStories$errors-1e-5 < 0, 1, all))
+      rownames(clusteredStories$cloneStories)[germlineCluster] = clusteredStories$cloneStories$call[germlineCluster] = 'germline'
+      rownames(clusteredStories$cloneStories$stories)[germlineCluster] = rownames(clusteredStories$cloneStories$errors)[germlineCluster] = 'germline'
+      names(clusteredStories$storyList)[germlineCluster] = 'germline'
+      cloneTree = findCloneTree(clusteredStories$cloneStories)
+
 
       #separate stories that fitted to a consistent clone
       allConsistentStories = allStories[unlist(consistentClusteredStories$storyList),]
@@ -556,8 +568,8 @@ freqToDirectionProb = function(freq, freqX, f, clonality) {
 
 #takes a dataframe of stories and groups them into subclone stories. returns a data frame of the subclone stories
 #and a list of dataframes for the individual stories in each subclone.
-storiesToCloneStories = function(stories, SNPs, storyList=as.list(rownames(stories)),
-  minDistance=-qnorm(0.01), plotProgress=F, plot=F, cpus=1) {
+storiesToCloneStories = function(stories, storyList=as.list(rownames(stories)),
+  minDistance=-qnorm(0.01), cpus=1) {
   if ( length(storyList) < 2 )
     return(list('cloneStories'=stories, 'storyList'=storyList))
 
@@ -566,8 +578,8 @@ storiesToCloneStories = function(stories, SNPs, storyList=as.list(rownames(stori
   batchSize = 1000
   while ( length(storyList) > batchSize ) {
     catLog(length(storyList), ' stories. Merge first batch separately...', sep='')
-    first300 = storiesToCloneStories(stories=stories, SNPs=SNPs, storyList=storyList[1:batchSize],
-      minDistance=minDistance*0.5, plotProgress=plotProgress, plot=plot, cpu=cpus)
+    first300 = storiesToCloneStories(stories=stories, storyList=storyList[1:batchSize],
+      minDistance=minDistance*0.5, cpu=cpus)
     storyList = c(first300$storyList, storyList[(batchSize+1):length(storyList)])
   }
 
@@ -577,8 +589,6 @@ storiesToCloneStories = function(stories, SNPs, storyList=as.list(rownames(stori
   
   while ( any(distance < minDistance) ) {
     merge = which(distance == min(distance), arr.ind=TRUE)[1,]
-    if ( plotProgress ) plotStories(stories[c(storyList[[merge[1]]], storyList[[merge[2]]]),],
-                                   col=c(rep('blue', length(storyList[[merge[1]]])), rep('red', length(storyList[[merge[2]]]))), SNPs, main=paste0('Distance = ', min(distance)))
     
     storyList[[merge[1]]] = c(storyList[[merge[1]]], storyList[[merge[2]]])
     distance[merge[1],] = distance[,merge[1]] = sapply(1:length(storyList), function(j)
@@ -606,7 +616,6 @@ storiesToCloneStories = function(stories, SNPs, storyList=as.list(rownames(stori
   clusters$stories = st
   clusters$errors = err
 
-  if ( plot ) plotStories(clusters, SNPs)
   names(storyList) = rownames(clusters)
   return(list('cloneStories'=clusters, 'storyList'=storyList))
 }
