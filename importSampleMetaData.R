@@ -22,7 +22,7 @@ importSampleMetaData = function(sampleMetaDataFile) {
     stop('Could not find required columns BAM, INDIVIDUAL, NAME, NORMAL in sample meta data.\n
 The meta data file should be a tab separated file with headings.\n')
   catLog('done.\n')
-  newNames = make.names(metaData$NAME, unique=T)
+  newNames = make.names(c('normal', metaData$NAME), unique=T)[-1]
   if ( any(newNames != metaData$NAME) ) {
     catLog('Standardised sample names to:\n')
     catLog(newNames, sep='\n')
